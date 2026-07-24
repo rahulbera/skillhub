@@ -13,3 +13,7 @@ and `examples/`). Skills are synced into consuming repos under
 - **git-commit** — prepare a convention-following commit in any repo. Detects the
   repo's commit conventions (message format, formatter, trailers, gates) once,
   persists them to a `.commit-profile`, then formats/verifies/stages/commits.
+- **slurm-launch** — launch/monitor/collect batch jobs on an SSH-only Slurm
+  cluster via a pluggable per-repo backend (contract: configure/submit/status/
+  collect). Generic playbook + operational notes; ChampSim's cluster_run.py is
+  the reference backend.

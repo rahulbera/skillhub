@@ -1,0 +1,40 @@
+# .slurm-launch/config.yml  --  per-repo cluster config for the slurm-launch skill.
+#
+# WRITTEN ONCE per repo by the backend's `configure` verb (bootstrap), then
+# reused. Lives at <repo>/.slurm-launch/config.yml and is gitignored. Edit it to
+# change the build command, cluster, or slurm defaults. Fields below show the
+# ChampSim/Hermes values as an illustration.
+
+job_name: Hermes                 # a label for this workload/repo
+default_cluster: kratos2
+clusters:                        # clusters this repo may target
+  - kratos2
+
+# What the backend needs on the cluster.
+remote_interpreter: python3.10   # interpreter the backend/remote scripts run under
+remote_repo_path: /home/rahbera/from-rnadig/Hermes   # where this repo lives on the cluster
+build_command: ./build_champsim.sh glc multi multi multi multi 1 1 0
+
+# The pluggable execution layer (see reference/backend-contract.md).
+backend:
+  # Entrypoint invoked for each verb, called as: <command> <verb> --repo <root> ...
+  command: "python3.12 /home/rahbera/thesis/champsim-infra/scripts/cluster_run.py"
+  verbs: [configure, submit, status, collect, combine]
+
+slurm:
+  partition: cpu_part            # a REAL partition (verify with `sinfo`)
+  ncores: '1'
+  nodename: ntl-zeus
+  extra: ''
+  include: ''
+  exclude: ''
+
+# Remote layout.
+remote_base: /home/rahbera/from-rnadig
+remote_runs_base: /home/rahbera/from-rnadig/runs/Hermes
+
+# Never rsync these to the cluster.
+rsync_excludes:
+  - .git
+  - .slurm-launch
+  - bin/
