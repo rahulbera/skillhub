@@ -1,0 +1,37 @@
+# Worked example: the Hermes repo's conventions captured as a .commit-profile.
+# This is what detection would produce for Hermes (a specialized repo), showing
+# how the generic skill reproduces the old Hermes-specific behavior with zero
+# hardcoding. A specialized repo wires formatter/review/verify to its own tools.
+
+message:
+  format: custom
+  template: |
+    <intent line>
+
+    <short rationale body>
+
+    Constraint: ...
+    Rejected: ... | ...
+    Confidence: low|medium|high
+    Scope-risk: narrow|moderate|broad
+    Directive: ...
+    Tested: ...
+    Not-tested: ...
+  subject_max: 72
+
+trailers:
+  co_author: false        # Hermes forbids AI co-author lines
+  require: []
+
+formatter:
+  # Hermes keeps its own clang-format wrapper in its skill fork.
+  cmd: "bash .claude/skills/git-commit/format.sh --fix"
+
+review:
+  cmd: "code-review"       # Hermes runs code-review on every commit-worthy change
+
+verify:
+  cmd: "testing"           # Hermes runs the testing skill when code changed
+
+staging:
+  exclude: ["build/", "*.o", "bin/"]

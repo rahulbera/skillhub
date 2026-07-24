@@ -1,72 +1,74 @@
 ---
 name: git-commit
-description: Prepare a Hermes commit with required review and verification. Use when creating commits or when the user asks to commit changes.
+description: Prepare a clean, convention-following git commit in any repo. Detects the repo's commit conventions (message format, formatter, trailers, review/test gates) once and persists them to a .commit-profile, then formats, verifies, stages, and commits. Use when creating commits or when the user asks to commit changes.
 ---
 
-# Hermes Git Commit Workflow
+# Git commit workflow (generic)
 
-## Goals
+Make a well-formed commit that follows **this** repo's conventions. The workflow
+is fixed; the repo-specific bits live in a `.commit-profile` at the repo root,
+learned once and reused.
 
-1. Ensure the change conforms to the codebase formatting norm.
-2. Review the staged or unstaged change set.
-3. Run the appropriate local verification.
-4. Create a focused commit message that follows the repository Lore protocol.
+> This is the portable template. A repo may keep a **specialized fork** of this
+> skill (e.g. Hermes's Lore-format `git-commit`). Do NOT `sync.sh` this generic
+> version over a repo that has its own — it would clobber the specialization.
 
 ## Workflow
 
-1. Check changed files with:
+Create a todo per step; work them in order.
 
-   ```bash
-   git diff --name-only
-   git diff --cached --name-only
-   ```
+### 1. Orient
+- Look for `.commit-profile` at the repo root (`git rev-parse --show-toplevel`).
+- If present, load it and go to step 2.
+- If absent, follow `reference/detect.md` to infer the repo's conventions,
+  **echo the inferred profile to the user for confirmation/correction**, then
+  write it to `<repo-root>/.commit-profile` (copy `reference/profile_template.yml`
+  and fill it). See `examples/hermes-lore.commit-profile.yml` for a filled one.
 
-2. **Enforce formatting before anything else.** Run the bundled script to bring
-   every changed C++ file up to the repo's `.clang-format`:
-
-   ```bash
-   bash "$(git rev-parse --show-toplevel)/.claude/skills/git-commit/format.sh" --fix
-   ```
-
-   It reformats only the files that differ from `HEAD` (staged, unstaged, and new
-   untracked), re-running clang-format to a fixed point. It no-ops cleanly if the
-   repo has no `.clang-format`, and errors (exit 3) if a `.clang-format` exists but
-   `clang-format` is not installed — install it rather than skipping. Run without
-   `--fix` for a non-mutating check (exit 1 lists offenders); add `--all` to sweep
-   the whole tree. Any files it rewrites must be (re-)staged in step 5 so the
-   formatting lands in this commit.
-
-3. Run `code-review` for every commit-worthy change set.
-4. Run `testing` when code or executable model behavior changed.
-5. Stage only the intended files (including anything the formatter rewrote).
-6. Review the staged diff:
-
-   ```bash
-   git diff --cached
-   ```
-
-7. Commit using the Lore format from `AGENTS.md`.
-
-## Commit Rules
-
-- Keep one coherent change per commit.
-- Do not stage generated artifacts, build output, or local machine state.
-- Do not add AI co-author lines.
-- Record external constraints and rejected alternatives when they mattered.
-
-## Message Shape
-
-```text
-<intent line>
-
-<short rationale body>
-
-Constraint: ...
-Rejected: ... | ...
-Confidence: low|medium|high
-Scope-risk: narrow|moderate|broad
-Directive: ...
-Tested: ...
-Not-tested: ...
+### 2. Survey the change
+```bash
+git diff --name-only
+git diff --cached --name-only
 ```
+Understand what changed, and whether it is one coherent change. If it is two
+unrelated changes, split them into separate commits.
 
+### 3. Format  (only if `formatter.cmd` is set)
+Run the repo's formatter on the changed files, then re-stage anything it
+rewrote so the formatting lands in this commit. Skip cleanly if `formatter.cmd`
+is empty.
+
+### 4. Review  (only if `review.cmd` is set)
+Run the configured review step. Skip if null.
+
+### 5. Verify  (only if `verify.cmd` is set and code changed)
+Run the configured verification (tests / lint) when code or executable behavior
+changed. Skip for docs-only changes, or when null.
+
+### 6. Stage
+Stage only the intended files — including anything the formatter rewrote. Never
+stage paths matched by `staging.exclude` (build output, logs, local machine
+state).
+
+### 7. Review the staged diff
+```bash
+git diff --cached
+```
+Confirm every staged hunk belongs in this commit.
+
+### 8. Commit
+Write the message in `message.format`:
+- **conventional** — `type(scope): summary` (imperative, ≤ `subject_max` chars),
+  blank line, body explaining what and why.
+- **plain** — imperative subject ≤ `subject_max`, blank line, rationale body.
+- **custom** — follow `message.template` verbatim (e.g. a Lore block).
+
+Apply `trailers`: add any `require`d trailers; add AI co-author lines **only if**
+`trailers.co_author` is true.
+
+## Rules
+- One coherent change per commit.
+- Never stage generated artifacts, build output, or local machine state.
+- Commit or push only when the user asked for it.
+- The message states what changed and why; record real constraints and rejected
+  alternatives when they mattered.

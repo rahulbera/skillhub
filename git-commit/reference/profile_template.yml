@@ -1,0 +1,42 @@
+# .commit-profile  --  per-repo commit conventions for the git-commit skill.
+#
+# WRITTEN ONCE per repo, after the first-use detection pass (the skill infers
+# these from the repo, echoes them for your confirmation, then saves this file
+# at the REPO ROOT). Later commits read it and skip detection. Edit or delete
+# it to re-learn. Every field is optional; omit a step to skip it.
+
+message:
+  # conventional | plain | custom
+  #   conventional -> "type(scope): summary" + body
+  #   plain        -> imperative subject + body
+  #   custom       -> follow `template` verbatim
+  format: conventional
+  # For format: custom only -- the exact message shape to follow.
+  template: null
+  # Max subject-line length.
+  subject_max: 72
+
+trailers:
+  # Add AI co-author lines to the commit message?
+  co_author: false
+  # Trailers that must be present (e.g. ["Signed-off-by"]).
+  require: []
+
+formatter:
+  # Command run on the changed files before committing; output re-staged.
+  # Empty/null = no formatting step. Examples:
+  #   "npm run format"   "ruff format"   "make fmt"   "cargo fmt"
+  cmd: null
+
+review:
+  # A review step/skill/command to run before committing. null = skip.
+  cmd: null
+
+verify:
+  # Verification (tests/lint) to run when code changed. null = skip. Examples:
+  #   "npm test"   "pytest -q"   "make test"
+  cmd: null
+
+staging:
+  # Paths/globs that must never be staged.
+  exclude: ["build/", "dist/", "*.log"]
