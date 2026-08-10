@@ -47,21 +47,34 @@ The new project's data may look nothing like Hermes rollups. Do not guess.
 - Ask the user: which chart archetype (grouped bars / line-S-curve / sorted
   tornado / 2-facet — see conventions.md), which series/configs, which metric.
 - Map the request to the nearest script in `examples/hermes/`.
+- Note any vector-format preference (PDF default, SVG on request) — it changes
+  only the `house_save(vector=)` argument.
 
 ### 5. Generate + run
 - Copy the closest example as `plot_<name>.R` in the project's scripts dir.
 - Rewire steps 4-7 (data read, metadata join, transform, relabel) from
   `.plot-contract.yml`; keep steps 1-3, 8-10 (grammar + export) unchanged.
-- Run it with `Rscript`. Confirm it produced **PNG + PDF + `*_numbers.csv`** in
-  the contract's output dir. If any is missing, the chart is not done.
+- Run it with `Rscript`. Confirm it produced **PNG + the vector file +
+  `*_numbers.csv`** in the contract's output dir. If any is missing, the chart
+  is not done.
 
-### 6. Show + iterate
+### 6. Look at it, then show + iterate
+- **View the rendered chart yourself before surfacing it.** Read the PNG (or
+  rasterize the vector file: `rsvg-convert -w 1000 chart.svg -o /tmp/check.png`)
+  and check the two things code review cannot catch: dead whitespace beside the
+  panel, and text that overflows or collides. Fix per "Canvas sizing" in
+  conventions.md and re-run.
+- For an SVG, also confirm the font is baked in: `grep -c 'font-family' chart.svg`
+  must be 0 (see "Vector export").
 - Surface the PNG to the user (SendUserFile). Iterate on labels/ranges/subtitle
   per feedback, re-running the script each time.
 
 ## Rules (from conventions.md — do not violate)
 - No error bars unless explicitly requested.
-- A `*_numbers.csv` behind every chart; both PNG and PDF every time.
+- A `*_numbers.csv` behind every chart; PNG plus one vector format every time.
+- Vector text must be paths (cairo devices), never an un-embedded font
+  reference (svglite) — the font will not survive on another machine.
+- No dead whitespace beside the panel; verify by viewing the rendered file.
 - Color is tied to the series NAME (in `house_fill`), never its position.
 - No dependency on `ggpattern` (may be unavailable); use contrast palettes.
 

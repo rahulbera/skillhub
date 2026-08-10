@@ -70,14 +70,26 @@ house_dodge   <- function(width = 0.9) ggplot2::position_dodge(width = width)
 house_col     <- function(...) ggplot2::geom_col(width = 0.85, colour = "grey30", linewidth = 0.12, ...)
 house_hline1  <- function(y = 1) ggplot2::geom_hline(yintercept = y, linetype = "dashed", colour = "grey40")
 
-# Dual export: PNG via ragg @200dpi + PDF via cairo. ALWAYS call this instead
-# of a bare ggsave, so every chart ships both formats at identical geometry.
-house_save <- function(plot, path_noext, width = 13, height = 7, dpi = 200) {
+# Dual export: PNG via ragg @200dpi + one vector format at identical geometry.
+# ALWAYS call this instead of a bare ggsave.
+#   vector = "pdf" (default, cairo_pdf) or "svg" (cairo grDevices::svg).
+# Both cairo devices convert glyphs to PATHS, so the house font renders
+# identically on machines that do not have it installed. Do NOT swap in
+# svglite: it writes live <text font-family="..."> without embedding the font,
+# so any viewer lacking the font silently substitutes a different one.
+house_save <- function(plot, path_noext, width = 13, height = 7, dpi = 200,
+                       vector = c("pdf", "svg")) {
+  vector <- match.arg(vector)
   ggplot2::ggsave(paste0(path_noext, ".png"), plot, width = width, height = height,
                   dpi = dpi, device = ragg::agg_png)
-  ggplot2::ggsave(paste0(path_noext, ".pdf"), plot, width = width, height = height,
-                  device = grDevices::cairo_pdf)
-  message("wrote ", path_noext, ".{png,pdf}")
+  if (vector == "pdf") {
+    ggplot2::ggsave(paste0(path_noext, ".pdf"), plot, width = width, height = height,
+                    device = grDevices::cairo_pdf)
+  } else {
+    ggplot2::ggsave(paste0(path_noext, ".svg"), plot, width = width, height = height,
+                    device = grDevices::svg)
+  }
+  message("wrote ", path_noext, ".{png,", vector, "}")
 }
 
 # Benefit-of-doubt accuracy convention: a series that makes no prediction is
