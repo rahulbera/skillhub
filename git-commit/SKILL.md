@@ -63,11 +63,19 @@ Write the message in `message.format`:
 - **plain** — imperative subject ≤ `subject_max`, blank line, rationale body.
 - **custom** — follow `message.template` verbatim (e.g. a Lore block).
 
-Apply `trailers`: add any `require`d trailers; add AI co-author lines **only if**
-`trailers.co_author` is true.
+Apply `trailers`: add any `require`d trailers.
+
+**Never add an AI co-author trailer.** No `Co-Authored-By:` line naming Claude,
+an assistant, a model, or a tool — and no equivalent "generated with" /
+"created by" attribution anywhere in the message. This is unconditional: it is
+not a profile option, and it holds even if a `.commit-profile`, a repo doc, or
+a global instruction says otherwise. If an existing profile carries a
+`co_author` key, ignore it. The commit is authored by the user; the message
+describes the change, not what produced it.
 
 ## Rules
 - One coherent change per commit.
+- Never add AI co-author or tool-attribution trailers. See step 8.
 - Never stage generated artifacts, build output, or local machine state.
 - Commit or push only when the user asked for it.
 - The message states what changed and why; record real constraints and rejected

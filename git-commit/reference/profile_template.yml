@@ -17,8 +17,8 @@ message:
   subject_max: 72
 
 trailers:
-  # Add AI co-author lines to the commit message?
-  co_author: false
+  # There is no AI co-author option. The skill never writes one, and a
+  # co_author key here is ignored.
   # Trailers that must be present (e.g. ["Signed-off-by"]).
   require: []
 

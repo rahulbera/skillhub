@@ -20,7 +20,6 @@ message:
   subject_max: 72
 
 trailers:
-  co_author: false        # Hermes forbids AI co-author lines
   require: []
 
 formatter:

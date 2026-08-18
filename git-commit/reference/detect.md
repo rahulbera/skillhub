@@ -23,14 +23,14 @@ signal is absent.
    default 72.
 
 ## `trailers`
-- Scan recent commits for `Co-authored-by:` / `Signed-off-by:`:
+- Scan recent commits for required trailers:
   ```bash
   git log -30 --format='%(trailers)'
   ```
-- `co_author`: true only if recent commits consistently include AI co-author
-  lines AND no doc forbids them. Default **false** (many repos forbid them).
 - `require`: any trailer that appears on essentially every commit (e.g.
   `Signed-off-by` in DCO repos).
+- Do **not** detect anything about AI co-author lines. The skill never writes
+  one, so there is nothing to infer — not even if history is full of them.
 
 ## `formatter.cmd`
 Look, in order, for a canonical format command the repo already exposes:
@@ -55,5 +55,5 @@ artifacts): `build/`, `dist/`, `target/`, `node_modules/`, `*.log`, plus any
 local-state files. These are belt-and-suspenders on top of `.gitignore`.
 
 ## Conservative defaults (nothing detected)
-`message.format: plain`, `subject_max: 72`, `trailers.co_author: false`,
+`message.format: plain`, `subject_max: 72`, `trailers.require: []`,
 `formatter.cmd: null`, `review.cmd: null`, `verify.cmd: null`.
