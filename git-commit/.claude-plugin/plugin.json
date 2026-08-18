@@ -1,0 +1,8 @@
+{
+  "name": "git-commit",
+  "description": "Prepare a clean, convention-following git commit in any repo, driven by a detected per-repo .commit-profile.",
+  "author": { "name": "Rahul Bera" },
+  "homepage": "https://github.com/rahulbera/skillhub",
+  "repository": "https://github.com/rahulbera/skillhub",
+  "keywords": ["git", "commit", "workflow"]
+}

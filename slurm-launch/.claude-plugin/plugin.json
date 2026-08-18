@@ -1,0 +1,8 @@
+{
+  "name": "slurm-launch",
+  "description": "Launch, monitor, and collect batch jobs on a remote SSH-only Slurm cluster via a pluggable per-repo backend.",
+  "author": { "name": "Rahul Bera" },
+  "homepage": "https://github.com/rahulbera/skillhub",
+  "repository": "https://github.com/rahulbera/skillhub",
+  "keywords": ["slurm", "cluster", "hpc", "batch-jobs"]
+}

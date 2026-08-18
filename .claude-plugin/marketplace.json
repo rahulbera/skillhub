@@ -1,0 +1,47 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "skillhub",
+  "description": "Rahul Bera's personal Claude Code skills: research plotting, commits, research-log reports, and Slurm job orchestration.",
+  "owner": {
+    "name": "Rahul Bera",
+    "url": "https://github.com/rahulbera"
+  },
+  "plugins": [
+    {
+      "name": "ggplot-house-style",
+      "source": "./ggplot-house-style",
+      "description": "Generate publication-quality charts in a consistent house style (ggplot2 + hrbrthemes, dual PNG/PDF export, a numbers-CSV behind every chart). Orients to a project's data format once, persists it, then plots.",
+      "author": { "name": "Rahul Bera" },
+      "repository": "https://github.com/rahulbera/skillhub",
+      "category": "productivity",
+      "keywords": ["r", "ggplot2", "charts", "research", "plotting"]
+    },
+    {
+      "name": "git-commit",
+      "source": "./git-commit",
+      "description": "Prepare a clean, convention-following git commit in any repo. Detects the repo's commit conventions once, persists them to a .commit-profile, then formats, verifies, stages, and commits.",
+      "author": { "name": "Rahul Bera" },
+      "repository": "https://github.com/rahulbera/skillhub",
+      "category": "development",
+      "keywords": ["git", "commit", "workflow"]
+    },
+    {
+      "name": "research-report",
+      "source": "./research-report",
+      "description": "Write a research-log report for a completed experiment or mechanism study, organized like a scientific paper (Key Idea, Mechanism, Evaluation Methodology, Key Results, Next Steps).",
+      "author": { "name": "Rahul Bera" },
+      "repository": "https://github.com/rahulbera/skillhub",
+      "category": "productivity",
+      "keywords": ["research", "report", "writeup", "experiments"]
+    },
+    {
+      "name": "slurm-launch",
+      "source": "./slurm-launch",
+      "description": "Launch, monitor, and collect batch jobs on a remote SSH-only Slurm cluster via a pluggable per-repo backend (configure/submit/status/collect).",
+      "author": { "name": "Rahul Bera" },
+      "repository": "https://github.com/rahulbera/skillhub",
+      "category": "development",
+      "keywords": ["slurm", "cluster", "hpc", "batch-jobs"]
+    }
+  ]
+}

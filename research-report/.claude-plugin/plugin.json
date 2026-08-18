@@ -1,0 +1,8 @@
+{
+  "name": "research-report",
+  "description": "Write a research-log report for a completed experiment or mechanism study, organized like a scientific paper.",
+  "author": { "name": "Rahul Bera" },
+  "homepage": "https://github.com/rahulbera/skillhub",
+  "repository": "https://github.com/rahulbera/skillhub",
+  "keywords": ["research", "report", "writeup", "experiments"]
+}

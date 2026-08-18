@@ -1,0 +1,8 @@
+{
+  "name": "ggplot-house-style",
+  "description": "Generate publication-quality charts in a consistent house style (ggplot2 + hrbrthemes, dual PNG/PDF export, a numbers-CSV behind every chart).",
+  "author": { "name": "Rahul Bera" },
+  "homepage": "https://github.com/rahulbera/skillhub",
+  "repository": "https://github.com/rahulbera/skillhub",
+  "keywords": ["r", "ggplot2", "charts", "research", "plotting"]
+}
