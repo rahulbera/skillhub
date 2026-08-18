@@ -25,46 +25,53 @@ repo is pushed.
 
 ## Install
 
-Add the marketplace, then install the skills you want:
+Add the marketplace once per machine:
 
 ```sh
-claude plugin marketplace add git@github.com:rahulbera/skillhub.git
-claude plugin install ggplot-house-style@skillhub
-claude plugin install git-commit@skillhub
-claude plugin install research-report@skillhub
-claude plugin install slurm-launch@skillhub
+claude plugin marketplace add https://github.com/rahulbera/skillhub.git
 ```
 
-Use the **SSH** URL, not `rahulbera/skillhub` over HTTPS. This repo is private,
-and the background auto-update pull deliberately disables git credential
-helpers, so an HTTPS remote authenticates on manual updates but silently fails
-on automatic ones. SSH needs the key loaded in `ssh-agent`, or a
-passphrase-less key on disk, plus `github.com` in `known_hosts`.
+Prefer that HTTPS URL over the `rahulbera/skillhub` shorthand, which clones
+over SSH and so needs a GitHub key on every machine that uses it.
 
-Auto-update is off by default for third-party marketplaces. Turn it on once,
-either through `/plugin` → **Marketplaces** → *skillhub* → **Enable
-auto-update**, or by setting it directly in `~/.claude/settings.json`:
+Then install per project, from inside the repo:
 
-```json
-{
-  "extraKnownMarketplaces": {
-    "skillhub": {
-      "source": { "source": "git", "url": "git@github.com:rahulbera/skillhub.git" },
-      "autoUpdate": true
-    }
-  },
-  "env": {
-    "CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE": "1"
-  }
-}
+```sh
+cd /path/to/repo
+claude plugin install ggplot-house-style@skillhub --scope project
+claude plugin install git-commit@skillhub        --scope project
+claude plugin install research-report@skillhub   --scope project
+claude plugin install slurm-launch@skillhub      --scope project
 ```
 
-`CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE` keeps the existing clone when
-a background pull fails, instead of deleting and re-cloning — worth setting for
-a private marketplace, where a failed re-clone would otherwise take the skills
-offline until the next manual update.
+Run `/reload-plugins` afterwards in any open session. Skills load namespaced
+by their plugin, e.g. `slurm-launch:slurm-launch`.
 
-Skills load namespaced by their plugin, e.g. `slurm-launch:slurm-launch`.
+## Scope
+
+Install at **project** scope. `--scope project` records the choice in that
+repo's `.claude/settings.json`, so each repo takes only the skills it wants —
+which matters because skills vary per project. A repo that keeps its own
+**specialized fork** of a skill (gem5 has a `git-commit` built around gem5's
+tag-based header format and its own pre-commit gate) must simply not install
+the marketplace version there; installing it would shadow the fork with the
+generic one.
+
+Commit the resulting `.claude/settings.json` and collaborators inherit the
+choice. They still run `claude plugin install` themselves — since Claude Code
+v2.1.195, a plugin from an external source is never auto-installed by a
+project's settings alone. To hand them the catalog too:
+
+```sh
+claude plugin marketplace add https://github.com/rahulbera/skillhub.git --scope project
+```
+
+User scope (the default, no `--scope`) installs a skill into *every* project on
+that machine. Reserve it for skills that are genuinely universal.
+
+Per-repo *conventions* are a different axis from scope: `git-commit` adapts to
+a repo through its `.commit-profile`, so differing commit formats alone are not
+a reason to fork the skill.
 
 ## How updates work
 
@@ -75,12 +82,32 @@ Declaring a version would pin installs until that string was bumped by hand.
 
 `claude plugin validate --strict` warns about the missing version. Ignore it.
 
-Claude Code refreshes after a session starts, on a random delay of up to ten
-minutes, then prompts for `/reload-plugins`. To pull immediately:
+Auto-update is off by default for third-party marketplaces. Turn it on through
+`/plugin` → **Marketplaces** → *skillhub* → **Enable auto-update**, or set it
+directly in `~/.claude/settings.json`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "skillhub": {
+      "source": { "source": "git", "url": "https://github.com/rahulbera/skillhub.git" },
+      "autoUpdate": true
+    }
+  }
+}
+```
+
+Claude Code then refreshes after a session starts, on a random delay of up to
+ten minutes, and prompts for `/reload-plugins`. To pull immediately:
 
 ```sh
 claude plugin marketplace update skillhub
 ```
+
+Setting `CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE=1` in `env` keeps the
+existing clone when a background pull fails, instead of deleting and
+re-cloning. Optional, but it stops a network blip from taking the skills
+offline until the next successful update.
 
 ## Adding a skill
 
@@ -92,7 +119,8 @@ Each skill is its own plugin, so a new one takes three steps:
 2. Add `<name>/.claude-plugin/plugin.json` and an entry in
    `.claude-plugin/marketplace.json` with `"source": "./<name>"`. Copy an
    existing pair; omit `version` in both.
-3. Push, then `claude plugin install <name>@skillhub` once on each machine.
+3. Push, then `claude plugin install <name>@skillhub --scope project` in each
+   repo that wants it.
 
 Edits to skills that are already installed need none of this — just push.
 
@@ -105,6 +133,7 @@ claude plugin validate .
 ## Vendoring into a repo
 
 Some skills carry a `sync.sh` that copies them into a consuming repo under
-`.claude/skills/<name>/`. That path is no longer how these skills reach my own
-machines — it is for shipping a skill to collaborators or CI, where a private
-marketplace is not reachable.
+`.claude/skills/<name>/`. That predates the marketplace and is no longer how
+these skills are distributed — a vendored copy is a snapshot that never
+updates. Keep it only for environments that cannot reach the marketplace, and
+never `sync.sh` over a repo that maintains its own fork of a skill.
