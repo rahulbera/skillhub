@@ -1,0 +1,52 @@
+# .aws-launch/config.yml  --  per-repo config for the aws-launch skill.
+#
+# WRITTEN ONCE per repo by the backend's `configure` verb (bootstrap), then
+# reused. Lives at <repo>/.aws-launch/config.yml and is gitignored. Edit to change
+# the cluster, buckets, or build/job commands. Values below are the ChampSim/Hermes
+# reference (see ../examples/champsim/).
+#
+# SECURITY: this file names an AWS *profile* only. Never put an access key here.
+
+job_name: Hermes
+
+# --- AWS access (see reference/credentials.md) ---
+aws_profile: aws-launch            # named profile in ~/.aws/ that assumes the deployer role
+region: us-east-1                  # region is locked; every call is scoped here
+cluster_name: champsim             # ParallelCluster name; head node is found by its tags
+
+# --- S3 layout ---
+s3_traces:  s3://champsim-traces-all     # inputs live here (read-only for jobs)
+s3_results: s3://champsim-results-all    # results + bootstrap scripts + logs live here
+trace_prefix: version2/spec26            # default key prefix under s3_traces for inputs
+
+# --- Slurm / compute ---
+partition: sim-spot                # a REAL Spot partition (verify with sinfo)
+ncores_per_job: 1
+
+# --- Remote (head node) layout: everything runs as this user via SSM ---
+remote_user: ubuntu
+remote_repo_path: /home/ubuntu/Hermes
+build_command: ./build_champsim.sh glc multi multi multi multi 1 1 0
+binary: bin/glc-perceptron-no-multi-multi-multi-multi-1core-1ch
+# Per-job wrapper: stages one input S3->/scratch, runs, pushes result->S3.
+# Uploaded to s3://<results>/bootstrap/ by `submit`; the sbatch array calls it.
+job_wrapper: scripts/champsim-job.sh
+
+# Default run knobs appended to every job (workload-specific).
+# NOTE for ChampSim v2 traces (.champsim2.zst): --trace_version=2 is REQUIRED.
+default_knobs: >-
+  --warmup_instructions=10000000 --simulation_instructions=50000000 --trace_version=2
+  --llc_replacement_type=ship --config={REMOTE_REPO}/config/nopref.ini
+  --num_rob_partitions=3 --rob_partition_size=64,128,320
+  --rob_frontal_partition_ids=0 --rob_dorsal_partition_ids=2
+
+# --- Head-node lifecycle ---
+idle_stop_minutes: 15              # auto-stop threshold (systemd timer on the head node)
+
+# --- The pluggable backend (see reference/backend-contract.md) ---
+backend:
+  command: "python3 scripts/aws_launch.py"   # bundled AWS backend (relative to the skill)
+  verbs: [configure, submit, status, collect]
+
+# Local run ledger/output base (gitignored).
+runs_base: .aws-launch/runs

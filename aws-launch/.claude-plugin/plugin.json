@@ -1,0 +1,8 @@
+{
+  "name": "aws-launch",
+  "description": "Launch, monitor, and collect batch jobs on an elastic AWS ParallelCluster Spot Slurm cluster over SSM, with S3 input/result staging and on-demand wake of an auto-stopping head node, via a pluggable per-repo backend.",
+  "author": { "name": "Rahul Bera" },
+  "homepage": "https://github.com/rahulbera/skillhub",
+  "repository": "https://github.com/rahulbera/skillhub",
+  "keywords": ["aws", "parallelcluster", "spot", "slurm", "cluster", "hpc", "batch-jobs", "ssm", "s3"]
+}

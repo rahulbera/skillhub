@@ -1,0 +1,33 @@
+# Reference .aws-launch/config.yml for ChampSim/Hermes on the `champsim` AWS cluster.
+# Copy to <repo>/.aws-launch/config.yml (or let `configure` write it), set aws_profile.
+job_name: Hermes
+aws_profile: aws-launch
+region: us-east-1
+cluster_name: champsim
+
+s3_traces:  s3://champsim-traces-all
+s3_results: s3://champsim-results-all
+trace_prefix: version2/spec26
+
+partition: sim-spot
+ncores_per_job: 1
+
+remote_user: ubuntu
+remote_repo_path: /home/ubuntu/Hermes
+build_command: ./build_champsim.sh glc multi multi multi multi 1 1 0
+binary: bin/glc-perceptron-no-multi-multi-multi-multi-1core-1ch
+job_wrapper: scripts/champsim-job.sh
+
+default_knobs: >-
+  --warmup_instructions=10000000 --simulation_instructions=50000000 --trace_version=2
+  --llc_replacement_type=ship --config={REMOTE_REPO}/config/nopref.ini
+  --num_rob_partitions=3 --rob_partition_size=64,128,320
+  --rob_frontal_partition_ids=0 --rob_dorsal_partition_ids=2
+
+idle_stop_minutes: 15
+
+backend:
+  command: "python3 scripts/aws_launch.py"
+  verbs: [configure, submit, status, collect]
+
+runs_base: .aws-launch/runs
