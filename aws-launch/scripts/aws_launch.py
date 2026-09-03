@@ -145,7 +145,7 @@ def verb_submit(args):
     wrapper = os.path.join(SKILL_DIR, cfg["job_wrapper"])
     s3_put(cfg, wrapper, f"{cfg['s3_results']}/bootstrap/champsim-job.sh")
     tl = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
-    tl.write("\n".join(traces)); tl.close()
+    tl.write("\n".join(traces) + "\n"); tl.close()
     s3_put(cfg, tl.name, f"{cfg['s3_results']}/bootstrap/{batch}.traces.txt")
 
     # ensure built + smoke-gate (run one quick job on the head node itself)
@@ -168,22 +168,23 @@ def verb_submit(args):
         sys.exit(f"error_id=smoke_failed (no Finished line)\n{out}\n{err}")
     print("[submit] smoke passed. Submitting array...")
 
-    # remote submit loop: sbatch each trace x exp, print 'SUBMIT <tag> <jobid>'
-    lines = [
-        f"runuser -l {cfg['remote_user']} -c '",
-        f"export PATH=/opt/slurm/bin:/usr/local/bin:$PATH; cd /home/{cfg['remote_user']}; ",
-        f"aws s3 cp {cfg['s3_results']}/bootstrap/champsim-job.sh ./champsim-job.sh --region {cfg['region']} --no-progress >/dev/null; chmod +x champsim-job.sh; ",
-        f"aws s3 cp {cfg['s3_results']}/bootstrap/{batch}.traces.txt ./tl.txt --region {cfg['region']} --no-progress >/dev/null; mkdir -p results; ",
-    ]
+    # remote submit: upload a bundled submitter script + trace/exps files, run it.
+    # Knobs live in the exps file (never inline) -> no SSM quoting to get wrong.
+    ef = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
     for exp, knobs in exps.items():
-        # champsim-job.sh <trace> <exp> "<knobs>"
-        lines.append(
-            f'while IFS= read -r t; do [ -z "$t" ] && continue; '
-            f'JID=$(sbatch --parsable --time=00:40:00 -p {cfg["partition"]} -c {cfg["ncores_per_job"]} '
-            f'-J "{exp}-${{t%.champsim2.zst}}" champsim-job.sh "$t" {exp} "{knobs}"); '
-            f'echo "SUBMIT {exp} $t $JID"; done < tl.txt; ')
-    lines.append("'")
-    st, out, err = ssm_run(cfg, head, ["".join(lines)], timeout=600)
+        ef.write(f"{exp}\t{knobs}\n")
+    ef.close()
+    s3_put(cfg, ef.name, f"{cfg['s3_results']}/bootstrap/{batch}.exps.txt")
+    s3_put(cfg, os.path.join(SKILL_DIR, "scripts", "_submit_remote.sh"),
+           f"{cfg['s3_results']}/bootstrap/_submit_remote.sh")
+    rb, R = cfg["s3_results"], cfg["region"]
+    runuser_cmd = (
+        f"runuser -l {cfg['remote_user']} -c 'set -e; cd $HOME; "
+        f"aws s3 cp {rb}/bootstrap/_submit_remote.sh sb.sh --region {R} --no-progress; "
+        f"aws s3 cp {rb}/bootstrap/{batch}.traces.txt traces.txt --region {R} --no-progress; "
+        f"aws s3 cp {rb}/bootstrap/{batch}.exps.txt exps.txt --region {R} --no-progress; "
+        f"bash sb.sh {rb} traces.txt exps.txt {cfg['partition']} {cfg['ncores_per_job']} {R}'")
+    st, out, err = ssm_run(cfg, head, [runuser_cmd], timeout=600)
     jobs = []
     for m in re.finditer(r"^SUBMIT (\S+) (\S+) (\d+)$", out, re.M):
         jobs.append({"exp": m.group(1), "trace": m.group(2), "job_id": m.group(3),
@@ -201,23 +202,27 @@ def verb_status(args):
     batch = args.batch or _latest_batch(repo, cfg)
     led = json.load(open(ledger_path(repo, cfg, batch)))
     head = wake(cfg)
-    ids = ",".join(j["job_id"] for j in led["jobs"])
+    # ParallelCluster runs Slurm with accounting OFF (no sacct), so detect
+    # completion via squeue membership: a job in squeue is active; absent => done.
     st, out, err = ssm_run(cfg, head, [
         f"export PATH=/opt/slurm/bin:$PATH; "
-        f"sacct -j {ids} -n -X -o JobID,State 2>/dev/null; "
+        f"echo QSTART; squeue -h -o '%i %T' 2>/dev/null; echo QEND; "
         f"echo NODES=$(sinfo -h -o '%D %t' | awk '$2==\"mix\"||$2==\"alloc\"||$2==\"idle\"{{s+=$1}}END{{print s+0}}')"],
         timeout=120)
-    states = {}
+    active, in_q = {}, False
     for line in out.splitlines():
-        parts = line.split()
-        if len(parts) == 2 and parts[0].isdigit():
-            states[parts[0]] = parts[1]
+        t = line.strip()
+        if t == "QSTART": in_q = True; continue
+        if t == "QEND": in_q = False; continue
+        if in_q:
+            p = t.split()
+            if len(p) >= 2 and p[0].isdigit():
+                active[p[0]] = p[1]
     counts = {}
     for j in led["jobs"]:
-        s = states.get(j["job_id"], "PENDING")
+        s = active.get(j["job_id"], "DONE")
         counts[s] = counts.get(s, 0) + 1
-    terminal = {"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL"}
-    done = all(states.get(j["job_id"], "PENDING") in terminal for j in led["jobs"])
+    done = all(j["job_id"] not in active for j in led["jobs"])
     led["state"] = "complete" if done else "running"
     json.dump(led, open(ledger_path(repo, cfg, batch), "w"), indent=2)
     nodes = re.search(r"NODES=(\d+)", out)
