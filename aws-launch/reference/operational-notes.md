@@ -11,10 +11,20 @@ shell) — **no SSH keys**. Jobs on the head node run as the `remote_user`
 must stay in the backend so the ledger is exact.
 
 ## The head-node lifecycle (the big difference from an on-prem cluster)
-- The head node **auto-stops** after `idle_stop_minutes` of an empty queue **and**
-  no interactive session (a systemd timer, `scripts/deploy-idle-stop.sh`, with an
-  active-session guard). A stopped head costs only its EBS root (~$8/mo) instead
-  of ~$0.15/hr.
+- The head node **auto-stops** after `idle_stop_minutes` (default **30**) of an
+  empty queue **and** no other activity (a systemd timer, `scripts/deploy-idle-stop.sh`).
+  A stopped head costs only its EBS root (~$8/mo) instead of ~$0.15/hr.
+- The guard treats **all** of these as busy: a non-empty Slurm queue, a logged-in
+  user or SSM Session Manager shell, **a running `aws ssm send-command`**
+  (`ssm-document-worker`), a workload process on the head node, and the explicit
+  lock `/var/lib/champsim-busy`. The send-command guard matters: a run-command is
+  *not* an interactive session, so without it a long automated setup step gets shut
+  down underneath itself. For multi-step work hold the lock
+  (`sudo touch /var/lib/champsim-busy`, refreshed; it goes stale after 45 min so a
+  crashed job can't pin the node forever). Keep the workload pattern tight — a loose
+  one self-matches the guard script's own path and pins the node up permanently.
+- Don't set `idle_stop_minutes` below ~30: the window has to comfortably exceed your
+  longest gap between commands during interactive setup.
 - Every `submit`/`status`/`collect` **wakes it first** via `scripts/aws-wake.sh`
   (idempotent: start-if-stopped → wait running → SSM online → `slurmctld` ready,
   ~30 s). A wake is **dollar-free** — stop/start are free, EBS is flat, and the

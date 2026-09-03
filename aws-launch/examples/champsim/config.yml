@@ -24,7 +24,7 @@ default_knobs: >-
   --num_rob_partitions=3 --rob_partition_size=64,128,320
   --rob_frontal_partition_ids=0 --rob_dorsal_partition_ids=2
 
-idle_stop_minutes: 15
+idle_stop_minutes: 30
 
 backend:
   command: "python3 scripts/aws_launch.py"

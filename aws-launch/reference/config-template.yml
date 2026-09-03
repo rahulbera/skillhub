@@ -41,7 +41,7 @@ default_knobs: >-
   --rob_frontal_partition_ids=0 --rob_dorsal_partition_ids=2
 
 # --- Head-node lifecycle ---
-idle_stop_minutes: 15              # auto-stop threshold (systemd timer on the head node)
+idle_stop_minutes: 30              # auto-stop threshold (systemd timer on the head node)
 
 # --- The pluggable backend (see reference/backend-contract.md) ---
 backend:
