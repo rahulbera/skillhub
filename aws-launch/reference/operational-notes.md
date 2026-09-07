@@ -10,6 +10,33 @@ shell) — **no SSH keys**. Jobs on the head node run as the `remote_user`
 (`ubuntu`). Never hand-roll job submission outside the backend; job-id capture
 must stay in the backend so the ledger is exact.
 
+## One cluster, many projects and people
+
+The head node is shared. Every project gets its own namespace, set by `project` and
+`remote_project_root` in the config, and it applies on BOTH sides:
+
+    s3://<results>/bootstrap/<project>/   this project's job wrapper + batch files
+    s3://<results>/results/<project>/     this project's output (what `collect` syncs)
+    <remote_project_root>/
+      Hermes/      that project's ChampSim checkout + built binary
+      results/     Slurm .out/.err logs only
+      run-assets/  wrapper, *.exps, *.tlist -- submission happens HERE, never in $HOME
+
+This is not cosmetic. Before namespacing there was a single
+`bootstrap/champsim-job.sh` and submission ran in `$HOME`, so a second project or a
+second person submitting would overwrite the first one's wrapper and scratch files
+mid-flight. `load_cfg` now refuses to run if a config lacks these keys rather than
+silently falling back to the shared layout.
+
+Two details worth knowing:
+- The bundled `scripts/champsim-job.sh` is a **template**. Its `#SBATCH -o/-e` lines
+  cannot use a shell variable (Slurm parses them before any shell runs), so the backend
+  substitutes `{{PROJECT_ROOT}}` at upload time, per project.
+- Results are NOT kept on the head node. A job writes stats to the compute node's
+  `/scratch`, uploads to S3, and deletes the local copy; only the small Slurm logs stay
+  on NFS. Keeping a second copy on the head node grew /home by ~14 GB per campaign on a
+  97 GB volume.
+
 ## The head-node lifecycle (the big difference from an on-prem cluster)
 - The head node **auto-stops** after `idle_stop_minutes` (default **30**) of an
   empty queue **and** no other activity (a systemd timer, `scripts/deploy-idle-stop.sh`).

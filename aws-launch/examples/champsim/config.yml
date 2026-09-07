@@ -5,15 +5,21 @@ aws_profile: aws-launch
 region: us-east-1
 cluster_name: champsim
 
+# Namespaces BOTH the S3 keys and the on-node directory so projects/users can't
+# overwrite each other. See reference/config-template.yml for the full explanation.
+project: hermes-uncore
+remote_project_root: /home/ubuntu/rbera/hermes-uncore
+
 s3_traces:  s3://champsim-traces-all
 s3_results: s3://champsim-results-all
 trace_prefix: version2/spec26
 
 partition: sim-spot
 ncores_per_job: 1
+walltime: 24:00:00
 
 remote_user: ubuntu
-remote_repo_path: /home/ubuntu/Hermes
+remote_repo_path: /home/ubuntu/rbera/hermes-uncore/Hermes
 build_command: ./build_champsim.sh glc multi multi multi multi 1 1 0
 binary: bin/glc-perceptron-no-multi-multi-multi-multi-1core-1ch
 job_wrapper: scripts/champsim-job.sh

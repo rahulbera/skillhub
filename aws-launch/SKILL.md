@@ -33,6 +33,16 @@ buckets, Slurm partition, and the build/job commands. Read
 `reference/operational-notes.md` once — the AWS-specific wisdom (wake lifecycle,
 Spot/requeue, S3 staging, cost, SSM, region lock).
 
+## Shared cluster — namespace before you submit
+
+One head node hosts several projects and several people. `project` and
+`remote_project_root` in the config namespace BOTH the S3 keys
+(`bootstrap/<project>/`, `results/<project>/`) and the on-node directory
+(`<remote_project_root>/{Hermes,results,run-assets}`). The backend refuses to run
+without them, because the old shared layout let a second project or person overwrite
+the first one's job wrapper and scratch files mid-flight. Never give two projects the
+same `project` value. Details in `reference/operational-notes.md`.
+
 ## Playbook
 Create a todo per step; work them in order. Each step calls the configured
 backend's verb; the backend drives the cluster over SSM.

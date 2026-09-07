@@ -31,7 +31,20 @@ def load_cfg(repo):
     if not os.path.exists(p):
         sys.exit(f"ERROR: no config at {p} — run `configure` (bootstrap) first")
     with open(p) as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+    # Fail loudly on a pre-namespacing config. Without these two keys the backend would
+    # fall back to one SHARED bootstrap key and $HOME, so two projects (or two people)
+    # would silently overwrite each other's wrapper and results. Refuse instead.
+    missing = [k for k in ("project", "remote_project_root") if not cfg.get(k)]
+    if missing:
+        sys.exit(
+            f"ERROR: {p} is missing {missing}.\n"
+            "This config predates per-project namespacing. Add, e.g.:\n"
+            "  project: my-project\n"
+            "  remote_project_root: /home/ubuntu/<user>/<project>\n"
+            "and point remote_repo_path at <remote_project_root>/Hermes.\n"
+            "See reference/config-template.yml.")
+    return cfg
 
 def runs_dir(repo, cfg): return os.path.join(repo, cfg.get("runs_base", ".aws-launch/runs"))
 
@@ -128,6 +141,24 @@ def _knobs(cfg, override):
     k = override or cfg["default_knobs"]
     return " ".join(k.split()).replace("{REMOTE_REPO}", cfg["remote_repo_path"])
 
+def boot_prefix(cfg):
+    """Per-PROJECT bootstrap prefix. Never share one key across projects/users: a
+    second project (or an intern) uploading its wrapper would silently replace yours."""
+    return f"{cfg['s3_results']}/bootstrap/{cfg['project']}"
+
+def results_prefix(cfg):
+    """Per-PROJECT results prefix, so `collect` never mixes two projects' output."""
+    return f"{cfg['s3_results']}/results/{cfg['project']}"
+
+def render_wrapper(cfg, src):
+    """The bundled wrapper is a TEMPLATE: its #SBATCH -o/-e lines cannot use a shell
+    variable (Slurm parses them before any shell runs), so the project root is
+    substituted here, at upload time, per project."""
+    txt = open(src).read().replace("{{PROJECT_ROOT}}", cfg["remote_project_root"])
+    tf = tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False)
+    tf.write(txt); tf.close()
+    return tf.name
+
 def verb_submit(args):
     repo = args.repo; cfg = load_cfg(repo)
     traces = [t.strip() for t in open(args.traces) if t.strip()]
@@ -142,11 +173,11 @@ def verb_submit(args):
     head = wake(cfg); print(f"[submit] head={head} awake")
 
     # stage job wrapper + trace list to S3
-    wrapper = os.path.join(SKILL_DIR, cfg["job_wrapper"])
-    s3_put(cfg, wrapper, f"{cfg['s3_results']}/bootstrap/champsim-job.sh")
+    wrapper = render_wrapper(cfg, os.path.join(SKILL_DIR, cfg["job_wrapper"]))
+    s3_put(cfg, wrapper, f"{boot_prefix(cfg)}/champsim-job.sh")
     tl = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
     tl.write("\n".join(traces) + "\n"); tl.close()
-    s3_put(cfg, tl.name, f"{cfg['s3_results']}/bootstrap/{batch}.traces.txt")
+    s3_put(cfg, tl.name, f"{boot_prefix(cfg)}/{batch}.traces.txt")
 
     # ensure built + smoke-gate (run one quick job on the head node itself)
     st, out, err = ssm_run(cfg, head, [
@@ -174,16 +205,19 @@ def verb_submit(args):
     for exp, knobs in exps.items():
         ef.write(f"{exp}\t{knobs}\n")
     ef.close()
-    s3_put(cfg, ef.name, f"{cfg['s3_results']}/bootstrap/{batch}.exps.txt")
+    s3_put(cfg, ef.name, f"{boot_prefix(cfg)}/{batch}.exps.txt")
     s3_put(cfg, os.path.join(SKILL_DIR, "scripts", "_submit_remote.sh"),
-           f"{cfg['s3_results']}/bootstrap/_submit_remote.sh")
-    rb, R = cfg["s3_results"], cfg["region"]
+           f"{boot_prefix(cfg)}/_submit_remote.sh")
+    BOOT, R, PR = boot_prefix(cfg), cfg["region"], cfg["remote_project_root"]
+    wall = cfg.get("walltime", "24:00:00")
+    # everything lands in the PROJECT's run-assets, never $HOME
     runuser_cmd = (
-        f"runuser -l {cfg['remote_user']} -c 'set -e; cd $HOME; "
-        f"aws s3 cp {rb}/bootstrap/_submit_remote.sh sb.sh --region {R} --no-progress; "
-        f"aws s3 cp {rb}/bootstrap/{batch}.traces.txt traces.txt --region {R} --no-progress; "
-        f"aws s3 cp {rb}/bootstrap/{batch}.exps.txt exps.txt --region {R} --no-progress; "
-        f"bash sb.sh {rb} traces.txt exps.txt {cfg['partition']} {cfg['ncores_per_job']} {R}'")
+        f"runuser -l {cfg['remote_user']} -c 'set -e; mkdir -p {PR}/run-assets; cd {PR}/run-assets; "
+        f"aws s3 cp {BOOT}/_submit_remote.sh sb.sh --region {R} --no-progress; "
+        f"aws s3 cp {BOOT}/{batch}.traces.txt traces.txt --region {R} --no-progress; "
+        f"aws s3 cp {BOOT}/{batch}.exps.txt exps.txt --region {R} --no-progress; "
+        f"bash sb.sh {BOOT} {PR} traces.txt exps.txt {cfg['partition']} "
+        f"{cfg['ncores_per_job']} {wall} {R}'")
     st, out, err = ssm_run(cfg, head, [runuser_cmd], timeout=600)
     jobs = []
     for m in re.finditer(r"^SUBMIT (\S+) (\S+) (\d+)$", out, re.M):
@@ -238,7 +272,7 @@ def verb_collect(args):
         sys.exit("batch not complete (run status; use --force to collect anyway)")
     outdir = os.path.join(runs_dir(repo, cfg), batch); os.makedirs(outdir, exist_ok=True)
     # results are s3://<results>/results/<trace_stem>-<exp>-j<jid>.txt
-    aws(cfg, ["s3", "sync", f"{cfg['s3_results']}/results/", os.path.join(outdir, "raw"),
+    aws(cfg, ["s3", "sync", f"{results_prefix(cfg)}/", os.path.join(outdir, "raw"),
               "--exclude", "*", "--include", "*-j*.txt", "--no-progress"], check=False)
     rows = []
     for j in led["jobs"]:
