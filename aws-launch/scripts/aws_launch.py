@@ -133,6 +133,12 @@ def wake(cfg):
 def s3_put(cfg, local, key):
     aws(cfg, ["s3", "cp", local, key, "--no-progress"])
 
+def s3_get(cfg, key, local):
+    """Fetch one S3 object. Used for records too big to survive SSM's 24,000-char
+    stdout cap -- see the job-id read in verb_submit. aws() raises on failure."""
+    aws(cfg, ["s3", "cp", key, local, "--no-progress"])
+    return local
+
 
 # ---------- verbs ----------
 def verb_configure(args):
@@ -268,14 +274,43 @@ def verb_submit(args):
         f"aws s3 cp {BOOT}/{batch}.traces.txt traces.txt --region {R} --no-progress; "
         f"aws s3 cp {BOOT}/{batch}.exps.txt exps.txt --region {R} --no-progress; "
         f"bash sb.sh {BOOT} {PR} traces.txt exps.txt {cfg['partition']} "
-        f"{cfg['ncores_per_job']} {wall} {R}'")
+        f"{cfg['ncores_per_job']} {wall} {R} {batch}'")
     st, out, err = ssm_run(cfg, head, [runuser_cmd], timeout=600)
+
+    # Job ids come from S3, NOT from `out`: SSM truncates StandardOutputContent at
+    # 24,000 chars, which silently drops the tail at roughly 340 jobs. Parsing stdout
+    # once wrote a 335-entry ledger for a 450-job batch and reported success, so
+    # `collect` would have skipped 115 finished jobs with nothing anywhere to show it.
+    expected = len(traces) * len(exps)
     jobs = []
-    for m in re.finditer(r"^SUBMIT (\S+) (\S+) (\d+)$", out, re.M):
+    with tempfile.NamedTemporaryFile("r+", suffix=".txt", delete=False) as sf:
+        pass
+    try:
+        s3_get(cfg, f"{boot_prefix(cfg)}/{batch}.submitted.txt", sf.name)
+        recorded = open(sf.name).read()
+    except Exception as e:
+        print(f"[submit] WARNING: could not fetch the submitted-job list from S3 "
+              f"({e}); falling back to SSM stdout, which may be truncated.")
+        recorded = out
+    finally:
+        os.unlink(sf.name)
+    for m in re.finditer(r"^SUBMIT (\S+) (\S+) (\d+)$", recorded, re.M):
         jobs.append({"exp": m.group(1), "trace": m.group(2), "job_id": m.group(3),
                      "tag": f"{m.group(1)}:{m.group(2)}"})
+    # The remote side summarises sbatch rejections by DISTINCT reason, so a
+    # wholly-rejected batch reports its one cause instead of N identical lines.
+    reasons = "\n".join("  " + m.group(1)
+                        for m in re.finditer(r"^SUBMIT_FAIL_REASON (.+)$", out, re.M))
+    why = f"\nsbatch rejections:\n{reasons}" if reasons else ""
     if not jobs:
-        sys.exit(f"error_id=submit_failed (no job ids)\n{out}\n{err}")
+        sys.exit(f"error_id=submit_failed — no jobs were queued.{why}\n"
+                 f"stdout tail:\n{out[-400:]}\n{err[-200:]}")
+    # A short ledger is unrecoverable later (collect reads it), so fail here instead.
+    if len(jobs) != expected:
+        sys.exit(f"error_id=ledger_incomplete — recorded {len(jobs)} job ids but "
+                 f"{expected} were expected ({len(traces)} traces x {len(exps)} exps). "
+                 f"Jobs MAY be queued on the cluster; check squeue before resubmitting."
+                 f"{why}\nstdout tail:\n{out[-400:]}\n{err[-200:]}")
     os.makedirs(os.path.join(runs_dir(repo, cfg), batch), exist_ok=True)
     with open(ledger_path(repo, cfg, batch), "w") as f:
         json.dump({"batch": batch, "state": "submitted", "submitted_at": time.time(),
@@ -294,6 +329,14 @@ def verb_status(args):
         f"echo QSTART; squeue -h -o '%i %T' 2>/dev/null; echo QEND; "
         f"echo NODES=$(sinfo -h -o '%D %t' | awk '$2==\"mix\"||$2==\"alloc\"||$2==\"idle\"{{s+=$1}}END{{print s+0}}')"],
         timeout=120)
+    # QSTART/QEND bracket the queue dump. A missing QEND means SSM truncated the
+    # output (24,000-char cap) -- and a truncated queue reads as "those jobs are
+    # gone", i.e. finished. Marking a running batch complete would send `collect`
+    # after results that do not exist yet, so refuse instead of guessing.
+    if "QSTART" not in out or "QEND" not in out:
+        sys.exit("error_id=status_truncated — the queue listing came back without its "
+                 "end marker, so it cannot be trusted (SSM caps stdout at 24,000 chars). "
+                 "Ledger left unchanged; re-run, or query squeue directly.")
     active, in_q = {}, False
     for line in out.splitlines():
         t = line.strip()

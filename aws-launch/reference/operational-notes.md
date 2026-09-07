@@ -143,6 +143,27 @@ Always run ONE quick job first; submit the array only if it passes. A bad build,
 a wrong knob, or a missing `--trace_version=2` fails the smoke job cheaply instead
 of failing (and paying Spot boot for) a whole array. `submit` owns this gate.
 
+## SSM truncates stdout at 24,000 characters — never parse a long list from it
+`aws ssm send-command` caps `StandardOutputContent` at **24,000 characters** and drops
+the rest **without an error**. Anything that returns one line per job overflows at
+roughly **340 jobs** and the tail vanishes silently.
+
+This bit a real 450-job batch: `submit` parsed `SUBMIT <exp> <trace> <jobid>` lines
+from stdout, recorded **335**, wrote that ledger, and printed
+`OK — batch full_512kb: 335 jobs queued` with exit 0. All 450 jobs were in fact
+queued and running; only the bookkeeping was short. Because `collect` reads the
+ledger, 115 finished jobs would have been skipped and the analysis would have been
+built on two-thirds of one experiment, with nothing anywhere reporting a problem.
+
+The rule: **any per-job record travels through S3, not SSM stdout.** The remote
+submitter writes `submitted.txt` and uploads it to
+`s3://<results>/<owner>/<project>/bootstrap/<batch>.submitted.txt`; the backend reads
+that file and then **asserts the count equals `traces x exps`**, exiting with
+`error_id=ledger_incomplete` if not. Bracket any other long listing with sentinels and
+verify the closing one arrived — `status` does this with `QSTART`/`QEND` and refuses to
+update the ledger if the end marker is missing, because a truncated queue listing reads
+as "those jobs finished".
+
 ## The ledger is the source of truth
 `submit` captures `tag → job_id` into `<repo>/.aws-launch/runs/<batch>/ledger.json`.
 `status` and `collect` read it; never reconstruct job ids by hand. If `submit`
