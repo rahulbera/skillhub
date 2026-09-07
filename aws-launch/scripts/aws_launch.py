@@ -26,25 +26,52 @@ SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # ---------- config / ledger ----------
 def cfg_path(repo): return os.path.join(repo, ".aws-launch", "config.yml")
 
+PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*$")
+
+def validate_cfg(cfg, p):
+    """Enforce the shared-cluster convention. Every check here corresponds to a way two
+    people or two projects can silently corrupt each other's run; none of them fail loudly
+    on their own, which is why they are checked up front rather than discovered later."""
+    missing = [k for k in ("project", "remote_project_root") if not cfg.get(k)]
+    if missing:
+        sys.exit(f"ERROR: {p} is missing {missing}.\n"
+                 "This config predates per-project namespacing. Add:\n"
+                 "  project: <owner>/<project>            e.g. rbera/hermes-uncore\n"
+                 "  remote_project_root: /home/<user>/<owner>/<project>\n"
+                 "and point remote_repo_path at <remote_project_root>/Hermes.\n"
+                 "See reference/config-template.yml.")
+    proj, root = cfg["project"], cfg["remote_project_root"].rstrip("/")
+    repo = cfg.get("remote_repo_path", "")
+
+    if "<" in proj or ">" in proj or "<" in root or ">" in root:
+        sys.exit(f"ERROR: {p} still contains template placeholders "
+                 f"(project={proj!r}, remote_project_root={root!r}).\n"
+                 "Replace them with your real owner/project before running anything.")
+    if not PROJECT_RE.match(proj):
+        sys.exit(f"ERROR: project={proj!r} must be OWNER-FIRST '<owner>/<project>', "
+                 "exactly one '/', lowercase (e.g. rbera/hermes-uncore).\n"
+                 "The S3 layout is <bucket>/<owner>/<project>/... so that ONE IAM statement\n"
+                 "(<bucket>/<owner>/*) scopes a person. A bare name would create a\n"
+                 "top-level prefix outside anyone's namespace.")
+    if not root.startswith("/"):
+        sys.exit(f"ERROR: remote_project_root={root!r} must be an absolute path.")
+    if not root.endswith("/" + proj):
+        sys.exit(f"ERROR: remote_project_root={root!r} must end with '{proj}'.\n"
+                 f"  expected something like /home/ubuntu/{proj}\n"
+                 "Otherwise results land under one owner's S3 prefix while files are written\n"
+                 "into a different owner's directory on the head node -- silently.")
+    if repo and not repo.startswith(root + "/"):
+        sys.exit(f"ERROR: remote_repo_path={repo!r} must live under remote_project_root\n"
+                 f"  ({root}/...), so each project builds its OWN ChampSim.")
+    return cfg
+
 def load_cfg(repo):
     p = cfg_path(repo)
     if not os.path.exists(p):
         sys.exit(f"ERROR: no config at {p} — run `configure` (bootstrap) first")
     with open(p) as f:
         cfg = yaml.safe_load(f)
-    # Fail loudly on a pre-namespacing config. Without these two keys the backend would
-    # fall back to one SHARED bootstrap key and $HOME, so two projects (or two people)
-    # would silently overwrite each other's wrapper and results. Refuse instead.
-    missing = [k for k in ("project", "remote_project_root") if not cfg.get(k)]
-    if missing:
-        sys.exit(
-            f"ERROR: {p} is missing {missing}.\n"
-            "This config predates per-project namespacing. Add, e.g.:\n"
-            "  project: my-project\n"
-            "  remote_project_root: /home/ubuntu/<user>/<project>\n"
-            "and point remote_repo_path at <remote_project_root>/Hermes.\n"
-            "See reference/config-template.yml.")
-    return cfg
+    return validate_cfg(cfg, p)
 
 def runs_dir(repo, cfg): return os.path.join(repo, cfg.get("runs_base", ".aws-launch/runs"))
 
@@ -129,6 +156,7 @@ def verb_configure(args):
     head = find_head(cfg); print(f"[configure] head node: {head}")
     for b in (cfg["s3_traces"], cfg["s3_results"]):
         aws(cfg, ["s3", "ls", b + "/"], check=False)
+    validate_cfg(cfg, p)   # refuse to write a config that violates the convention
     with open(p, "w") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
     gi = os.path.join(repo, ".gitignore")

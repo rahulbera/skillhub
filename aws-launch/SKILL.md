@@ -33,15 +33,32 @@ buckets, Slurm partition, and the build/job commands. Read
 `reference/operational-notes.md` once — the AWS-specific wisdom (wake lifecycle,
 Spot/requeue, S3 staging, cost, SSM, region lock).
 
-## Shared cluster — namespace before you submit
+## Shared cluster — the layout convention (enforced, not optional)
 
-One head node hosts several projects and several people. `project` and
-`remote_project_root` in the config namespace BOTH the S3 keys
-(`bootstrap/<project>/`, `results/<project>/`) and the on-node directory
-(`<remote_project_root>/{Hermes,results,run-assets}`). The backend refuses to run
-without them, because the old shared layout let a second project or person overwrite
-the first one's job wrapper and scratch files mid-flight. Never give two projects the
-same `project` value. Details in `reference/operational-notes.md`.
+One head node and one pair of buckets serve several projects and several people. Follow
+this layout; the backend **refuses to run** if the config violates it.
+
+    project: <owner>/<project>              e.g. rbera/hermes-uncore   (owner-first, one '/')
+    remote_project_root: /home/<user>/<owner>/<project>
+    remote_repo_path:    <remote_project_root>/Hermes
+
+    s3://<traces>/...                              SHARED, READ-ONLY. Never write here.
+    s3://<results>/<owner>/<project>/bootstrap/    job wrapper + batch files
+    s3://<results>/<owner>/<project>/results/      output (what `collect` syncs)
+    <remote_project_root>/{Hermes,results,run-assets}
+
+Owner-first is the whole point: everything one person owns sits under a single top-level
+prefix, so ONE IAM statement (`<results-bucket>/<owner>/*`) scopes them completely.
+
+`load_cfg` rejects, with an explanation, a config that: is missing `project` or
+`remote_project_root`; still contains the template's `<owner>/<project>` placeholders;
+uses a bare `project` name with no owner segment; has a `remote_project_root` that does
+not end with `<owner>/<project>` (results would land in one owner's S3 prefix while files
+are written to another's directory); or points `remote_repo_path` outside the project
+root (two projects would share one ChampSim build).
+
+**Never give two projects the same `project` value**, and never point a job at the traces
+bucket for writing. Full rationale in `reference/operational-notes.md`.
 
 ## Playbook
 Create a todo per step; work them in order. Each step calls the configured
