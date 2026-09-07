@@ -57,8 +57,9 @@ not end with `<owner>/<project>` (results would land in one owner's S3 prefix wh
 are written to another's directory); or points `remote_repo_path` outside the project
 root (two projects would share one ChampSim build).
 
-**Never give two projects the same `project` value**, and never point a job at the traces
-bucket for writing. Full rationale in `reference/operational-notes.md`.
+**Never give two projects the same full `<owner>/<project>` value** (the project name
+alone may repeat across different owners), and never point a job at the traces bucket
+for writing. Full rationale in `reference/operational-notes.md`.
 
 ## Playbook
 Create a todo per step; work them in order. Each step calls the configured
@@ -83,8 +84,13 @@ running `configure`.** Say explicitly what you are about to use, e.g.:
 
 > "I'll namespace this project as `mihai/pythia-sweep`. That claims
 > `s3://champsim-results-all/mihai/...` and `/home/ubuntu/mihai/pythia-sweep` on the
-> head node. Please confirm the owner name is yours and the project name isn't already
-> used by someone else on this cluster."
+> head node. Please confirm that `mihai` is your own owner name, and that you aren't
+> already using the project name `pythia-sweep` yourself."
+
+Only the **pair** has to be unique. Two people may each have a `pythia-sweep`;
+`mihai/pythia-sweep` and `todor/pythia-sweep` are different prefixes and never collide.
+What must not happen is claiming an owner name that isn't yours, or reusing one of your
+own project names.
 
 Get an explicit yes. Do **not** guess it from the directory name, the git remote, or
 the user's shell username — a wrong or duplicated value is not a private mistake:
