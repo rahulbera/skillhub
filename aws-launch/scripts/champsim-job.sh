@@ -27,10 +27,17 @@ RES_PREFIX="${4:-{{PROJECT}}/results}"
 # NOTE: the #SBATCH -o/-e lines above CANNOT use a variable -- Slurm parses them before
 # any shell runs -- so a project with a different root must edit those two lines too.
 PROJECT_ROOT="${PROJECT_ROOT:-{{PROJECT_ROOT}}}"
-EXE="$PROJECT_ROOT/Hermes/bin/glc-perceptron-no-multi-multi-multi-multi-1core-1ch"
+# Substituted from config `binary` at upload time, like PROJECT_ROOT above. It was
+# once hardcoded to the glc build while the smoke gate used cfg["binary"], so the
+# gate ran the right binary, passed, and all 450 jobs then died with exit 127.
+EXE="$PROJECT_ROOT/{{BINARY}}"
 S3_TRACES=s3://champsim-traces-all
 S3_RESULTS="s3://champsim-results-all/${RES_PREFIX}"
-SCRATCH=/scratch
+# Overridable so the mandatory head-node smoke gate can run this very wrapper: the
+# head node (c7g) has no /scratch instance store, only the compute nodes (c8gd) do.
+# A gate that runs the real wrapper is the point -- reimplementing the job path is
+# what let a hardcoded binary and a missing trace prefix through.
+SCRATCH="${SCRATCH:-/scratch}"
 RESDIR="$PROJECT_ROOT/results"
 mkdir -p "$RESDIR"
 

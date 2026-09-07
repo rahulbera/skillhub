@@ -14,7 +14,7 @@ Usage:
 
 Requires: python3 + PyYAML + AWS CLI v2 locally. See reference/credentials.md.
 """
-import argparse, json, os, re, subprocess, sys, tempfile, time
+import argparse, json, os, re, shlex, subprocess, sys, tempfile, time
 try:
     import yaml
 except ImportError:
@@ -205,13 +205,22 @@ def results_prefix(cfg):
     """Per-PROJECT results prefix, so `collect` never mixes two projects' output."""
     return f"{cfg['s3_results']}/{cfg['project']}/results"
 
+def _binary_relpath(cfg):
+    """`binary` is relative to remote_repo_path; the wrapper prefixes PROJECT_ROOT,
+    so hand it the path from the project root (normally 'Hermes/bin/<exe>')."""
+    b = cfg["binary"].lstrip("/")
+    repo = os.path.basename(cfg["remote_repo_path"].rstrip("/"))
+    return b if b.startswith(repo + "/") else f"{repo}/{b}"
+
 def render_wrapper(cfg, src):
     """The bundled wrapper is a TEMPLATE: its #SBATCH -o/-e lines cannot use a shell
     variable (Slurm parses them before any shell runs), so the project root is
     substituted here, at upload time, per project."""
     txt = (open(src).read()
            .replace("{{PROJECT_ROOT}}", cfg["remote_project_root"])
-           .replace("{{PROJECT}}", cfg["project"]))
+           .replace("{{PROJECT}}", cfg["project"])
+           # The jobs must run the SAME binary the smoke gate tested.
+           .replace("{{BINARY}}", _binary_relpath(cfg)))
     tf = tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False)
     tf.write(txt); tf.close()
     return tf.name
@@ -243,17 +252,143 @@ def verb_submit(args):
         timeout=900)
     if "BUILT=yes" not in out:
         sys.exit(f"error_id=build_failed\n{out}\n{err}")
-    print("[submit] binary present; running smoke job...")
-    smoke_knobs = "--warmup_instructions=1000000 --simulation_instructions=1000000 --trace_version=2 " \
-                  f"--llc_replacement_type=ship --config={cfg['remote_repo_path']}/config/nopref.ini " \
-                  "--num_rob_partitions=3 --rob_partition_size=64,128,320 --rob_frontal_partition_ids=0 --rob_dorsal_partition_ids=2"
+    # --- MANDATORY head-node gate -------------------------------------------------
+    # Runs THIS wrapper -- same binary, same trace resolution, same knobs -- on the
+    # head node, which shares the compute nodes' aarch64 ISA. Seconds, no Spot boot.
+    # It is the wrapper that matters, not the location: reimplementing the job path is
+    # what let a hardcoded binary (exit 127, 900 jobs) and a missing trace prefix
+    # (exit 90, 450 jobs) through a green gate. It cannot see compute-node-only
+    # problems (their separate IAM profile, the OnNodeConfigured bootstrap script,
+    # /scratch provisioning) -- use --spot-smoke for those on an unproven cluster.
+    smoke_exp = next(iter(exps))
+    smoke_knobs = re.sub(r"--warmup_instructions=\d+", "--warmup_instructions=1000000",
+                  re.sub(r"--simulation_instructions=\d+", "--simulation_instructions=1000000",
+                         exps[smoke_exp]))
+    PRH, RH = cfg["remote_project_root"], cfg["region"]
+    hs = f"/tmp/hsmoke.{batch}"
+    # Knobs go in a FILE, never inline. shlex.quote wraps in single quotes, which
+    # closes the outer `runuser -c '...'` -- the same nested-quoting trap the real
+    # submitter avoids by shipping knobs in a file ("no SSM quoting to get wrong").
+    hr = tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False)
+    hr.write("#!/bin/bash\nset -uo pipefail\n"
+             f"mkdir -p {PRH}/run-assets {hs}\n"
+             f"aws s3 cp {boot_prefix(cfg)}/champsim-job.sh {PRH}/run-assets/champsim-job.sh "
+             f"--region {RH} --no-progress\n"
+             f"chmod +x {PRH}/run-assets/champsim-job.sh\n"
+             f"export SCRATCH={hs} SLURM_JOB_ID=hsmoke PROJECT_ROOT={PRH}\n"
+             f"bash {PRH}/run-assets/champsim-job.sh \\\n"
+             f"  {resolve_trace(cfg, traces[0])} \\\n"
+             f"  hsmoke_{smoke_exp} \\\n"
+             f"  {shlex.quote(smoke_knobs)} \\\n"
+             f"  {cfg['project']}/results 2>&1 | tail -6\n"
+             f"rm -rf {hs}\n")
+    hr.close()
+    s3_put(cfg, hr.name, f"{boot_prefix(cfg)}/{batch}.hsmoke.sh")
+    os.unlink(hr.name)
+    print("[submit] head-node smoke: running the real wrapper...")
     st, out, err = ssm_run(cfg, head, [
-        f"runuser -l {cfg['remote_user']} -c 'cd {cfg['remote_repo_path']}; mkdir -p /tmp/smoke; "
-        f"aws s3 cp {cfg['s3_traces']}/{resolve_trace(cfg, traces[0])} /tmp/smoke/t.zst --region {cfg['region']} --no-progress >/dev/null; "
-        f"{cfg['binary']} {smoke_knobs} -traces /tmp/smoke/t.zst 2>&1 | grep -c \"Finished CPU 0\"; rm -f /tmp/smoke/t.zst'"],
-        timeout=600)
-    if "1" not in out.split():
-        sys.exit(f"error_id=smoke_failed (no Finished line)\n{out}\n{err}")
+        f"runuser -l {cfg['remote_user']} -c "
+        f"'aws s3 cp {boot_prefix(cfg)}/{batch}.hsmoke.sh /tmp/{batch}.hsmoke.sh "
+        f"--region {RH} --no-progress && bash /tmp/{batch}.hsmoke.sh; "
+        f"rm -f /tmp/{batch}.hsmoke.sh'"],
+        timeout=1200)
+    # Read the S3 artifact, not local scratch: the wrapper does `rm -f "$OUT"` once the
+    # upload succeeds, so the file is gone by the time we look. Checking S3 also proves
+    # the upload leg -- the last hop between a finished job and a usable number.
+    hkey = f"{results_prefix(cfg)}/hsmoke_{smoke_exp}/"
+    hobj = next((l.split()[-1] for l in aws(cfg, ["s3", "ls", hkey]).splitlines()
+                 if l.strip().endswith(".txt")), None)
+    if not hobj:
+        sys.exit(f"error_id=head_smoke_no_result — the wrapper left nothing under {hkey}. "
+                 f"The array was NOT submitted.\n{out[-1000:]}\n{err[-300:]}")
+    with tempfile.NamedTemporaryFile("r+", suffix=".txt", delete=False) as hf:
+        pass
+    s3_get(cfg, hkey + hobj, hf.name)
+    body = open(hf.name, errors="replace").read()
+    os.unlink(hf.name)
+    if "Finished CPU 0" not in body or not re.search(r"^champsim_exit_code 0$", body, re.M):
+        sys.exit(f"error_id=head_smoke_failed — the wrapper did not produce a clean result "
+                 f"on the head node. The array was NOT submitted.\nresult tail:\n{body[-900:]}")
+    hipc = re.search(r"^Core_0_cumulative_IPC (\S+)$", body, re.M)
+    print(f"[submit] head-node smoke OK — IPC={hipc.group(1) if hipc else '?'}")
+    aws(cfg, ["s3", "rm", f"{results_prefix(cfg)}/hsmoke_{smoke_exp}/", "--recursive"], check=False)
+
+    if not getattr(args, "spot_smoke", False):
+        print("[submit] spot-node smoke: disabled (default; --spot-smoke enables it). "
+              "The head-node gate above ran the real wrapper; a spot gate additionally "
+              "covers compute-only surfaces (their IAM profile, the OnNodeConfigured "
+              "bootstrap script, /scratch) and is worth it on an unproven cluster.")
+    else:
+        print("[submit] binary present; smoke-gating ONE real job through the wrapper...")
+
+        # The gate runs the SAME wrapper, submitter and binary the array will use -- only
+        # the instruction counts differ (cf. cluster-run, whose gate calls the very same
+        # wrap_with_orchestrator() as its job loop). A gate that reimplements the job path
+        # certifies a path nothing will take: this one previously staged the trace itself
+        # and invoked cfg["binary"] directly, so it passed while every submitted job died
+        # -- once on a trace-prefix mismatch (exit 90), once on a hardcoded binary the
+        # project did not have (exit 127). Both were invisible until the results were read.
+        smoke_exp = next(iter(exps))
+        smoke_knobs = re.sub(r"--warmup_instructions=\d+", "--warmup_instructions=1000000",
+                      re.sub(r"--simulation_instructions=\d+", "--simulation_instructions=1000000",
+                             exps[smoke_exp]))
+        sk_tl = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
+        sk_tl.write(resolve_trace(cfg, traces[0]) + "\n"); sk_tl.close()
+        sk_ef = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
+        sk_ef.write(f"smoke_{smoke_exp}\t{smoke_knobs}\n"); sk_ef.close()
+        s3_put(cfg, sk_tl.name, f"{boot_prefix(cfg)}/{batch}.smoke.traces.txt")
+        s3_put(cfg, sk_ef.name, f"{boot_prefix(cfg)}/{batch}.smoke.exps.txt")
+        s3_put(cfg, os.path.join(SKILL_DIR, "scripts", "_submit_remote.sh"),
+               f"{boot_prefix(cfg)}/_submit_remote.sh")
+        BOOT0, R0, PR0 = boot_prefix(cfg), cfg["region"], cfg["remote_project_root"]
+        st, out, err = ssm_run(cfg, head, [
+            f"runuser -l {cfg['remote_user']} -c 'set -e; mkdir -p {PR0}/run-assets; cd {PR0}/run-assets; "
+            f"aws s3 cp {BOOT0}/_submit_remote.sh sb.sh --region {R0} --no-progress; "
+            f"aws s3 cp {BOOT0}/{batch}.smoke.traces.txt st.txt --region {R0} --no-progress; "
+            f"aws s3 cp {BOOT0}/{batch}.smoke.exps.txt se.txt --region {R0} --no-progress; "
+            f"bash sb.sh {BOOT0} {PR0} st.txt se.txt {cfg['partition']} "
+            f"{cfg['ncores_per_job']} {cfg.get('walltime','24:00:00')} {R0} {batch}.smoke'"],
+            timeout=600)
+        m = re.search(r"^SUBMIT \S+ \S+ (\d+)$", out, re.M)
+        if not m:
+            rs = "\n".join("  " + x.group(1) for x in re.finditer(r"^SUBMIT_FAIL_REASON (.+)$", out, re.M))
+            sys.exit(f"error_id=smoke_submit_failed — the gate job could not be queued.\n{rs}\n{out[-400:]}\n{err[-200:]}")
+        sjid = m.group(1)
+        print(f"[submit] smoke job {sjid} queued; waiting (a Spot node may need to boot)...")
+        deadline = time.time() + 1800
+        while time.time() < deadline:
+            time.sleep(20)
+            st, qo, _ = ssm_run(cfg, head, [
+                f"export PATH=/opt/slurm/bin:$PATH; echo QS; squeue -h -j {sjid} -o '%T' 2>/dev/null; echo QE"], timeout=120)
+            if "QS" in qo and "QE" in qo and not re.search(r"^(PENDING|RUNNING|CONFIGURING|COMPLETING)$", qo, re.M):
+                break
+        else:
+            sys.exit(f"error_id=smoke_timeout — gate job {sjid} did not finish within 30 min.")
+        # Check the RESULT OBJECT the analysis will consume, not the slurm .out: the
+        # wrapper redirects the simulator's stdout into $OUT and uploads that, so the
+        # slurm log holds only the wrapper's own echoes. Reading the S3 artifact also
+        # proves the upload leg works, which is the last thing between a finished job
+        # and a usable number.
+        skey = f"{results_prefix(cfg)}/smoke_{smoke_exp}/"
+        listing = aws(cfg, ["s3", "ls", skey])
+        obj = next((l.split()[-1] for l in listing.splitlines() if l.strip().endswith(".txt")), None)
+        if not obj:
+            sys.exit(f"error_id=smoke_no_result — gate job {sjid} left nothing under {skey}. "
+                     f"The array was NOT submitted.")
+        with tempfile.NamedTemporaryFile("r+", suffix=".txt", delete=False) as rf:
+            pass
+        s3_get(cfg, skey + obj, rf.name)
+        body = open(rf.name, errors="replace").read()
+        os.unlink(rf.name)
+        ok_rc = re.search(r"^champsim_exit_code 0$", body, re.M)
+        ok_fin = "Finished CPU 0" in body
+        if not (ok_rc and ok_fin):
+            sys.exit(f"error_id=smoke_failed — gate job {sjid} did not produce a clean result "
+                     f"(exit_code_0={bool(ok_rc)} finished={ok_fin}). The array was NOT submitted.\n"
+                     f"result tail:\n{body[-900:]}")
+        ipc = re.search(r"^Core_0_cumulative_IPC (\S+)$", body, re.M)
+        print(f"[submit] smoke OK — real job finished, IPC={ipc.group(1) if ipc else '?'}")
+        aws(cfg, ["s3", "rm", skey + obj])   # keep the gate's output out of collect
     print("[submit] smoke passed. Submitting array...")
 
     # remote submit: upload a bundled submitter script + trace/exps files, run it.
@@ -407,6 +542,12 @@ def main():
         help="default: /home/<remote_user>/<project>")
     sub.choices["configure"].add_argument("--force", action="store_true")
     sub.choices["submit"].add_argument("--traces", required=True)
+    sub.choices["submit"].add_argument("--spot-smoke", action="store_true",
+        help="ALSO gate on a real job run on a Spot compute node (default off). The "
+             "head-node gate is mandatory and always runs; this adds coverage of "
+             "compute-only surfaces (node IAM profile, the OnNodeConfigured bootstrap "
+             "script, /scratch) at the cost of a Spot boot. Worth it on a new or "
+             "recently-changed cluster.")
     sub.choices["submit"].add_argument("--exps", required=True,
         help='semicolon-separated name=knobs; empty knobs -> default_knobs. e.g. "nopref=;pythia=--l2c_prefetcher_types=scooby ..."')
     sub.choices["submit"].add_argument("--label")
