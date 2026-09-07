@@ -15,12 +15,18 @@ must stay in the backend so the ledger is exact.
 The head node is shared. Every project gets its own namespace, set by `project` and
 `remote_project_root` in the config, and it applies on BOTH sides:
 
-    s3://<results>/bootstrap/<project>/   this project's job wrapper + batch files
-    s3://<results>/results/<project>/     this project's output (what `collect` syncs)
+    s3://<results>/<owner>/<project>/bootstrap/   job wrapper + batch files
+    s3://<results>/<owner>/<project>/results/     output (what `collect` syncs)
     <remote_project_root>/
       Hermes/      that project's ChampSim checkout + built binary
       results/     Slurm .out/.err logs only
       run-assets/  wrapper, *.exps, *.tlist -- submission happens HERE, never in $HOME
+
+`project` is deliberately OWNER-FIRST (`rbera/hermes-uncore`), so everything one person
+owns sits under a single top-level prefix. That is what makes the IAM policy trivial --
+one statement, `<results-bucket>/<owner>/*`, grants read+write to exactly that person's
+space and nothing else. The **traces bucket is shared and READ-ONLY** for everyone but its
+owner: it is ~1 TB that took hours to populate, and no job ever needs to write there.
 
 This is not cosmetic. Before namespacing there was a single
 `bootstrap/champsim-job.sh` and submission ran in `$HOME`, so a second project or a

@@ -7,7 +7,7 @@ cluster_name: champsim
 
 # Namespaces BOTH the S3 keys and the on-node directory so projects/users can't
 # overwrite each other. See reference/config-template.yml for the full explanation.
-project: hermes-uncore
+project: rbera/hermes-uncore
 remote_project_root: /home/ubuntu/rbera/hermes-uncore
 
 s3_traces:  s3://champsim-traces-all

@@ -142,19 +142,23 @@ def _knobs(cfg, override):
     return " ".join(k.split()).replace("{REMOTE_REPO}", cfg["remote_repo_path"])
 
 def boot_prefix(cfg):
-    """Per-PROJECT bootstrap prefix. Never share one key across projects/users: a
-    second project (or an intern) uploading its wrapper would silently replace yours."""
-    return f"{cfg['s3_results']}/bootstrap/{cfg['project']}"
+    """Per-PROJECT bootstrap prefix. `project` is OWNER-FIRST, e.g. "rbera/hermes-uncore",
+    so everything a person owns sits under one top-level prefix and a single IAM statement
+    (`<bucket>/<owner>/*`) scopes them. Never share one key across projects/users: a second
+    project (or a teammate) uploading its wrapper would silently replace yours."""
+    return f"{cfg['s3_results']}/{cfg['project']}/bootstrap"
 
 def results_prefix(cfg):
     """Per-PROJECT results prefix, so `collect` never mixes two projects' output."""
-    return f"{cfg['s3_results']}/results/{cfg['project']}"
+    return f"{cfg['s3_results']}/{cfg['project']}/results"
 
 def render_wrapper(cfg, src):
     """The bundled wrapper is a TEMPLATE: its #SBATCH -o/-e lines cannot use a shell
     variable (Slurm parses them before any shell runs), so the project root is
     substituted here, at upload time, per project."""
-    txt = open(src).read().replace("{{PROJECT_ROOT}}", cfg["remote_project_root"])
+    txt = (open(src).read()
+           .replace("{{PROJECT_ROOT}}", cfg["remote_project_root"])
+           .replace("{{PROJECT}}", cfg["project"]))
     tf = tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False)
     tf.write(txt); tf.close()
     return tf.name

@@ -18,7 +18,8 @@ set -uo pipefail
 TRACE_KEY="${1:?trace key required, e.g. version2/dlrm/dlrm_..._s0.champsim2.zst}"
 EXP="${2:-nopref}"
 KNOBS="${3:---warmup_instructions=1000000 --simulation_instructions=1000000 --trace_version=2 --llc_replacement_type=ship --config={{PROJECT_ROOT}}/Hermes/config/nopref.ini --num_rob_partitions=3 --rob_partition_size=64,128,320 --rob_frontal_partition_ids=0 --rob_dorsal_partition_ids=2}"
-RES_PREFIX="${4:-results}"
+# S3 prefix under the results bucket. Owner-first layout: <owner>/<project>/results/<campaign>
+RES_PREFIX="${4:-{{PROJECT}}/results}"
 
 # PROJECT_ROOT selects which project's ChampSim + results tree to use, so several
 # projects (each with its own ChampSim build) can share this one wrapper. Override by

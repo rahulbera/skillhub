@@ -18,10 +18,13 @@ cluster_name: champsim             # ParallelCluster name; head node is found by
 # One head node now hosts several projects and several people. `project` namespaces
 # BOTH the S3 keys and the on-node directory, so two projects can never overwrite each
 # other's job wrapper, scratch files, or results:
-#     s3://<results>/bootstrap/<project>/...   per-project wrapper + batch files
-#     s3://<results>/results/<project>/...     per-project output (what `collect` syncs)
+#   `project` is OWNER-FIRST -- "<owner>/<project>", e.g. rbera/hermes-uncore -- so all of
+#   one person's data sits under a single top-level prefix and ONE IAM statement
+#   (<bucket>/<owner>/*) scopes them. Traces stay shared and READ-ONLY for everyone.
+#     s3://<results>/<owner>/<project>/bootstrap/   wrapper + batch files
+#     s3://<results>/<owner>/<project>/results/     output (what `collect` syncs)
 #     <remote_project_root>/{Hermes,results,run-assets}
-project: my-project
+project: <owner>/<project>
 remote_project_root: /home/ubuntu/<user>/<project>
 
 # --- S3 layout ---
