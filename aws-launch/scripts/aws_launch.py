@@ -146,6 +146,12 @@ def verb_configure(args):
         cfg = yaml.safe_load(f)
     if args.profile: cfg["aws_profile"] = args.profile
     if args.cluster: cfg["cluster_name"] = args.cluster
+    cfg["project"] = args.project
+    cfg["remote_project_root"] = (args.project_root
+                                  or f"/home/{cfg['remote_user']}/{args.project}")
+    cfg["remote_repo_path"] = f"{cfg['remote_project_root']}/Hermes"
+    cfg["default_knobs"] = cfg["default_knobs"].replace("{REMOTE_REPO}", cfg["remote_repo_path"])
+    validate_cfg(cfg, p)   # layout first — cheap, and not masked by an AWS error
     # validate profile + head + buckets
     try:
         ident = aws(cfg, ["sts", "get-caller-identity", "--query", "Arn", "--output", "text"])
@@ -156,7 +162,6 @@ def verb_configure(args):
     head = find_head(cfg); print(f"[configure] head node: {head}")
     for b in (cfg["s3_traces"], cfg["s3_results"]):
         aws(cfg, ["s3", "ls", b + "/"], check=False)
-    validate_cfg(cfg, p)   # refuse to write a config that violates the convention
     with open(p, "w") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
     gi = os.path.join(repo, ".gitignore")
@@ -338,6 +343,11 @@ def main():
         s = sub.add_parser(v); s.add_argument("--repo", required=True)
     # per-verb args
     sub.choices["configure"].add_argument("--profile"); sub.choices["configure"].add_argument("--cluster")
+    sub.choices["configure"].add_argument("--project", required=True,
+        help="OWNER-FIRST '<owner>/<project>', e.g. rbera/hermes-uncore. Namespaces S3 keys "
+             "AND the head-node directory. CONFIRM WITH THE HUMAN before using it.")
+    sub.choices["configure"].add_argument("--project-root",
+        help="default: /home/<remote_user>/<project>")
     sub.choices["configure"].add_argument("--force", action="store_true")
     sub.choices["submit"].add_argument("--traces", required=True)
     sub.choices["submit"].add_argument("--exps", required=True,

@@ -73,12 +73,36 @@ backend's verb; the backend drives the cluster over SSM.
     (not collected), offer **Collect**.
 
 ### 2. Bootstrap (first use in a repo)
-Confirm the **AWS profile** and **cluster name** with the user (the rest has
-sensible defaults), then call the backend's `configure` verb. It validates the
-profile (`sts get-caller-identity`), discovers the head node by tag, checks the
-S3 buckets and the Slurm partition, and writes `config.yml` (gitignoring
-`.aws-launch/`). Idempotent with `--force`. If the profile is missing, point the
-user at `reference/credentials.md` (the backend can print the exact profile stub).
+Confirm the **AWS profile** and **cluster name** with the user, then ask for the
+**project namespace** — there is no sensible default and `configure` requires it:
+
+    --project <owner>/<project>        e.g. rbera/hermes-uncore
+
+**Ask the human for this value, and confirm it back to them a second time before
+running `configure`.** Say explicitly what you are about to use, e.g.:
+
+> "I'll namespace this project as `mihai/pythia-sweep`. That claims
+> `s3://champsim-results-all/mihai/...` and `/home/ubuntu/mihai/pythia-sweep` on the
+> head node. Please confirm the owner name is yours and the project name isn't already
+> used by someone else on this cluster."
+
+Get an explicit yes. Do **not** guess it from the directory name, the git remote, or
+the user's shell username — a wrong or duplicated value is not a private mistake:
+
+- Reusing someone else's `<owner>` writes your results into **their** prefix. The
+  cluster's node role has bucket-wide write access, so **AWS will allow it** and
+  nothing will fail — their rollups just silently gain your data, or lose to it.
+- Reusing an existing `<owner>/<project>` overwrites that project's job wrapper and
+  batch files in S3 mid-flight, corrupting a run that is already going.
+
+Neither is recoverable from the skill's side, and neither announces itself. Thirty
+seconds of confirmation avoids a bad day for someone who is not in the room.
+
+Then call the backend's `configure` verb. It validates the profile
+(`sts get-caller-identity`), discovers the head node by tag, checks the S3 buckets and
+the Slurm partition, enforces the layout convention, and writes `config.yml`
+(gitignoring `.aws-launch/`). Idempotent with `--force`. If the profile is missing,
+point the user at `reference/credentials.md`.
 
 ### 3. Pre-flight (once per new cluster/repo)
 Read-only. **Wake the head node first** — it may be stopped. Verify: partition
