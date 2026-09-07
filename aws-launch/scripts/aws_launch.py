@@ -174,6 +174,20 @@ def _knobs(cfg, override):
     k = override or cfg["default_knobs"]
     return " ".join(k.split()).replace("{REMOTE_REPO}", cfg["remote_repo_path"])
 
+def resolve_trace(cfg, t):
+    """Trace keys passed to the job wrapper are relative to the TRACES BUCKET ROOT.
+
+    A bare filename (no '/') gets `trace_prefix` prepended, so existing trace lists keep
+    working; anything already containing a '/' is taken as an explicit key (e.g.
+    "version2.1/spark/x.champsim2.zst"). This MUST be applied everywhere a trace is
+    resolved -- the smoke gate previously prepended trace_prefix while the submitted
+    jobs did not, so the gate passed and then every job died at stage-in with exit 90."""
+    t = t.strip().lstrip("/")
+    if "/" in t:
+        return t
+    pref = (cfg.get("trace_prefix") or "").strip("/")
+    return f"{pref}/{t}" if pref else t
+
 def boot_prefix(cfg):
     """Per-PROJECT bootstrap prefix. `project` is OWNER-FIRST, e.g. "rbera/hermes-uncore",
     so everything a person owns sits under one top-level prefix and a single IAM statement
@@ -213,7 +227,7 @@ def verb_submit(args):
     wrapper = render_wrapper(cfg, os.path.join(SKILL_DIR, cfg["job_wrapper"]))
     s3_put(cfg, wrapper, f"{boot_prefix(cfg)}/champsim-job.sh")
     tl = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
-    tl.write("\n".join(traces) + "\n"); tl.close()
+    tl.write("\n".join(resolve_trace(cfg, t) for t in traces) + "\n"); tl.close()
     s3_put(cfg, tl.name, f"{boot_prefix(cfg)}/{batch}.traces.txt")
 
     # ensure built + smoke-gate (run one quick job on the head node itself)
@@ -229,7 +243,7 @@ def verb_submit(args):
                   "--num_rob_partitions=3 --rob_partition_size=64,128,320 --rob_frontal_partition_ids=0 --rob_dorsal_partition_ids=2"
     st, out, err = ssm_run(cfg, head, [
         f"runuser -l {cfg['remote_user']} -c 'cd {cfg['remote_repo_path']}; mkdir -p /tmp/smoke; "
-        f"aws s3 cp {cfg['s3_traces']}/{cfg['trace_prefix']}/{traces[0]} /tmp/smoke/t.zst --region {cfg['region']} --no-progress >/dev/null; "
+        f"aws s3 cp {cfg['s3_traces']}/{resolve_trace(cfg, traces[0])} /tmp/smoke/t.zst --region {cfg['region']} --no-progress >/dev/null; "
         f"{cfg['binary']} {smoke_knobs} -traces /tmp/smoke/t.zst 2>&1 | grep -c \"Finished CPU 0\"; rm -f /tmp/smoke/t.zst'"],
         timeout=600)
     if "1" not in out.split():

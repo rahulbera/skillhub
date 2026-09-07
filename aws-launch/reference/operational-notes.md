@@ -22,6 +22,15 @@ The head node is shared. Every project gets its own namespace, set by `project` 
       results/     Slurm .out/.err logs only
       run-assets/  wrapper, *.exps, *.tlist -- submission happens HERE, never in $HOME
 
+**Reserved: `s3://<results>/bootstrap/` is CLUSTER INFRASTRUCTURE, not project data.**
+The ParallelCluster config's `OnNodeConfigured` script lives there and is fetched by every
+compute node at boot. It is deliberately outside the per-owner namespace because it belongs
+to the cluster, not a person. Do not move, rename, or "tidy" it into an owner prefix: nodes
+fail bootstrap with a 404, clustermgtd terminates them, and after 10 failures ParallelCluster
+puts the whole cluster into PROTECTED mode and marks the partition INACTIVE. That does not
+self-heal -- recovery is `pcluster update-compute-fleet --status START_REQUESTED` after the
+key is restored. (This happened on 2026-09-07.)
+
 `project` is deliberately OWNER-FIRST (`rbera/hermes-uncore`), so everything one person
 owns sits under a single top-level prefix. That is what makes the IAM policy trivial --
 one statement, `<results-bucket>/<owner>/*`, grants read+write to exactly that person's
