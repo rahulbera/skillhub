@@ -96,6 +96,12 @@ job's result from S3, builds a local summary table (e.g. IPC per trace/exp),
 and writes it to `<repo>/.aws-launch/runs/<batch>/`. Refuses an incomplete batch
 unless `--force`.
 
+The sync is incremental, and same-region reads are free (egress to a laptop is
+$0.09/GB with 100 GB/month free). **If the raw outputs are large, run the rollup on
+the head node and copy out only the summary** — and check one job's output size before
+launching hundreds: a debug knob left on in a shipped config once made each result 37 MB
+instead of 0.3 MB. See "Collecting results" in `reference/operational-notes.md`.
+
 ## The lifecycle (unique to AWS — the thing to internalize)
 - The head node **auto-stops** after the idle threshold (systemd timer + an
   active-session guard so it won't stop under an open session). Every

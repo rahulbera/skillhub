@@ -37,6 +37,44 @@ Two details worth knowing:
   on NFS. Keeping a second copy on the head node grew /home by ~14 GB per campaign on a
   97 GB volume.
 
+## Collecting results — and what to do when the outputs are large
+
+`collect` runs `aws s3 sync` from `s3://<results>/results/<project>/` to the local run
+dir. The sync is **incremental**, so re-running a rollup re-downloads nothing.
+
+Cost, so you can reason about it rather than guess:
+- Reading S3 from **inside** the region (head node, compute nodes) is **$0.00/GB**.
+- Pulling to a laptop is internet egress at **$0.09/GB**, but the first **100 GB/month**
+  is free account-wide. GET requests are ~$0.0004/1000 — noise.
+
+So for a normal campaign (results measured in MB) just `collect` and forget it.
+
+**When results are large (multi-GB), do the rollup ON the head node** — same-region
+reads are free and there is no egress — then copy out only the summary CSV. Sending
+10 GB of raw `.out` files to a laptop to compute a few hundred numbers is the wrong
+shape; ship the computation to the data.
+
+### Check output size before a long campaign — a debug knob can dominate it
+
+Look at what one job actually produced before launching hundreds:
+
+```bash
+aws s3 ls s3://<results>/results/<project>/ --recursive | sort -k3 -n | tail -3
+```
+
+Real example worth internalising. `config/pythia.ini` ships
+`scooby_enable_state_action_stats = true` (the knob's own default in `knobs.def` is
+`false`). It dumps the prefetcher's entire per-state action table at end of run: **1.84M
+lines, ~37 MB per Pythia job, 99% of the file**, versus ~0.3 MB for the same run with it
+off. One 714-job campaign wrote **13.1 GB** of results, of which ~13 GB was that table —
+and nothing in the rollup ever read it. Overriding it on the command line
+(`--scooby_enable_state_action_stats=false`, placed AFTER the `--config` that sets it)
+cut results ~360x with zero effect on any reported metric.
+
+The general rule: a config shipped for a paper's debugging is not automatically the right
+config for a bulk sweep. Diff the per-file size of one job against what you expect, and
+if a single result is tens of MB, find out what is in it before multiplying by N.
+
 ## The head-node lifecycle (the big difference from an on-prem cluster)
 - The head node **auto-stops** after `idle_stop_minutes` (default **30**) of an
   empty queue **and** no other activity (a systemd timer, `scripts/deploy-idle-stop.sh`).
