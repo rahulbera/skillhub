@@ -20,8 +20,8 @@ ChampSim's `cluster_run.py` is the reference implementation — see
 Each repo carries a gitignored `<repo>/.slurm-launch/config.yml` (schema:
 `reference/config-template.yml`) naming the cluster, remote paths, build command,
 and the **backend command**. Read `reference/operational-notes.md` once — it holds
-the cross-cutting wisdom (pre-flight, smoke-gate, snapshotting, ledger, SSH/sandbox,
-polling) that applies to every backend.
+the cross-cutting wisdom (pre-flight, smoke-gate, self-contained batches, ledger,
+SSH/sandbox, polling) that applies to every backend.
 
 ## Playbook
 
@@ -51,15 +51,23 @@ decompressors), a writable remote base, and one real input path resolves.
 
 ### 4. Submit a batch
 Call the backend's `submit` verb with the user's job inputs. The backend must:
-sync code to the cluster, build remotely, **smoke-gate** (run one quick job;
-only proceed if it passes), submit the sbatch array, and capture `tag→job_id`
-into a ledger.
+sync code to the cluster, build remotely, snapshot everything the batch's jobs
+read at run time (binary, config, scripts) into its run dir, **smoke-gate** (run
+one quick job; only proceed if it passes), submit the sbatch array, and capture
+`tag→job_id` into a ledger.
 - Success → report batch id + job count.
 - Failure → relay the backend's stable `error_id` + reason and stop (no jobs
-  queued).
-- **Batches are independent** if the backend snapshots build artifacts per batch
-  (see operational-notes) — launch in parallel freely; no need to drain earlier
-  batches first.
+  queued), unless the backend says the failure MAY have queued jobs: then check
+  `squeue` before anything is re-submitted. A refusal of a job spec that would
+  still read the live tree (e.g. a path in the repo outside its snapshotted config
+  dirs, or another spelling of the repo path) means the spec, or the backend's list
+  of snapshotted dirs, needs fixing, not a workaround.
+- **Batches are independent** when the backend makes each batch self-contained
+  (see operational-notes): submitting while earlier batches are queued or running
+  is safe — never drain or wait first. A binary-only snapshot does not qualify.
+  Submits themselves share the checkout's live remote tree while they sync, build
+  and snapshot: the backend serializes those of one checkout (a later one waits),
+  and separate local checkouts of the same repo must not submit concurrently.
 - Submits can take minutes (build + smoke) — run in the background so a
   foreground timeout doesn't kill it mid-build.
 
