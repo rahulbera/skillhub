@@ -23,7 +23,7 @@ cluster_name: champsim             # ParallelCluster name; head node is found by
 #   (<bucket>/<owner>/*) scopes them. Traces stay shared and READ-ONLY for everyone.
 #     s3://<results>/<owner>/<project>/bootstrap/   wrapper + batch files
 #     s3://<results>/<owner>/<project>/results/     output (what `collect` syncs)
-#     <remote_project_root>/{Hermes,results,run-assets}
+#     <remote_project_root>/{Hermes,champsim-infra,results,run-assets}
 project: <owner>/<project>
 remote_project_root: /home/ubuntu/<owner>/<project>
 
@@ -40,11 +40,41 @@ walltime: 24:00:00
 # --- Remote (head node) layout: everything runs as this user via SSM ---
 remote_user: ubuntu
 remote_repo_path: /home/ubuntu/<owner>/<project>/Hermes
+# The champsim-infra checkout whose scripts/ a jobfile-route batch (submit --tlist) copies.
+remote_infra_path: /home/ubuntu/<owner>/<project>/champsim-infra
 build_command: ./build_champsim.sh glc multi multi multi multi 1 1 0
 binary: bin/glc-perceptron-no-multi-multi-multi-multi-1core-1ch
-# Per-job wrapper: stages one input S3->/scratch, runs, pushes result->S3.
-# Uploaded to s3://<results>/bootstrap/ by `submit`; the sbatch array calls it.
+# Per-job wrapper: stages one input S3->/scratch, runs, pushes result->S3. Rendered per batch
+# and uploaded to s3://<results>/<owner>/<project>/bootstrap/<batch>.champsim-job.sh by `submit`;
+# the sbatch array calls it.
 job_wrapper: scripts/champsim-job.sh
+# Node-local trace cache for jobfile-route jobs and their head-node smoke run.
+trace_cache_dir: /scratch/trace_cache
+# Directories under remote_repo_path each batch copies (with a copy of its binary) under the sync lock,
+# so a later sync cannot change what its queued jobs read. Experiment paths into them are pointed at the
+# copy; any other path into the live tree, however spelled ('//', '..', $HOME, ~), is refused, and so is
+# a symlink in a copied dir that leads out of the batch. A listed dir the head node lacks is skipped.
+snapshot_dirs: [config]
+# Seconds a head-node launch (smoke trace fetch, smoke run, one sbatch per job) may take; SSM gets this
+# as its executionTimeout. SSM's kill need not reach a launch run under `runuser -c`, so the launch stops
+# itself (`timeout`) 300 s earlier, and jobs it queued before that may exist. Raise it for a very large batch.
+launch_timeout_s: 7200
+
+# --- Source sync (every `submit`, or `sync --build` on its own) ---------------
+# Mirrors LOCAL git work trees onto the head node before anything builds: tracked
+# files plus untracked files git does not ignore, as they are on disk (uncommitted
+# edits included). The remote copy is made IDENTICAL -- anything not in the source
+# is deleted -- except under `protect`, which is never copied or deleted. Every file
+# is re-hashed on the head node against a sha256 manifest; a mismatch stops the
+# submit. `local` is relative to the repo root, `remote` to remote_project_root, and
+# a remote may not be results/ or run-assets/ or a symlink. Sync is OPT-IN: without
+# this list, `sync`/`submit` refuse and print a proposal. `configure` writes the entry
+# for remote_repo_path; add others (e.g. champsim-infra) by hand.
+sync:
+  - local: Hermes                # "." when the repo root is the simulator itself
+    remote: Hermes
+    protect: [libbf, bin, obj]   # built on the head node, never shipped or deleted
+    exclude: []                  # not shipped; any head-node copy is deleted
 
 # Default run knobs appended to every job (workload-specific).
 # NOTE for ChampSim v2 traces (.champsim2.zst): --trace_version=2 is REQUIRED.
@@ -60,7 +90,7 @@ idle_stop_minutes: 30              # auto-stop threshold (systemd timer on the h
 # --- The pluggable backend (see reference/backend-contract.md) ---
 backend:
   command: "python3 scripts/aws_launch.py"   # bundled AWS backend (relative to the skill)
-  verbs: [configure, submit, status, collect]
+  verbs: [configure, sync, submit, status, collect]
 
 # Local run ledger/output base (gitignored).
 runs_base: .aws-launch/runs

@@ -27,7 +27,8 @@ RES_PREFIX="${4:-{{PROJECT}}/results}"
 # NOTE: the #SBATCH -o/-e lines above CANNOT use a variable -- Slurm parses them before
 # any shell runs -- so a project with a different root must edit those two lines too.
 PROJECT_ROOT="${PROJECT_ROOT:-{{PROJECT_ROOT}}}"
-# Substituted from config `binary` at upload time, like PROJECT_ROOT above. It was
+# Substituted at upload time with this batch's snapshot of config `binary`
+# (run-assets/<batch>/bin/...), so a rebuild cannot change what a queued job runs. It was
 # once hardcoded to the glc build while the smoke gate used cfg["binary"], so the
 # gate ran the right binary, passed, and all 450 jobs then died with exit 127.
 EXE="$PROJECT_ROOT/{{BINARY}}"

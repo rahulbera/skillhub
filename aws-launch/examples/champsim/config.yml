@@ -20,9 +20,23 @@ walltime: 24:00:00
 
 remote_user: ubuntu
 remote_repo_path: /home/ubuntu/rbera/hermes-uncore/Hermes
+remote_infra_path: /home/ubuntu/rbera/hermes-uncore/champsim-infra
 build_command: ./build_champsim.sh glc multi multi multi multi 1 1 0
 binary: bin/glc-perceptron-no-multi-multi-multi-multi-1core-1ch
 job_wrapper: scripts/champsim-job.sh
+trace_cache_dir: /scratch/trace_cache
+snapshot_dirs: [config]          # copied into every batch with its binary; see reference/config-template.yml
+launch_timeout_s: 7200
+
+# Mirrored onto the head node, sha256-verified, before every build.
+sync:
+  - local: Hermes
+    remote: Hermes
+    protect: [libbf, bin, obj]
+    exclude: [.codegraph]
+  - local: champsim-infra
+    remote: champsim-infra
+    exclude: [.codegraph]
 
 default_knobs: >-
   --warmup_instructions=10000000 --simulation_instructions=50000000 --trace_version=2
@@ -34,6 +48,6 @@ idle_stop_minutes: 30
 
 backend:
   command: "python3 scripts/aws_launch.py"
-  verbs: [configure, submit, status, collect]
+  verbs: [configure, sync, submit, status, collect]
 
 runs_base: .aws-launch/runs
