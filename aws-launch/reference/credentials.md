@@ -1,64 +1,82 @@
-# Credentials — one-time setup (interns & collaborators start here)
+# Credentials — one-time setup (new cluster users start here)
 
-`aws-launch` never stores AWS keys. All access goes through a **named AWS
-profile** you configure once on each machine; the skill just uses it. This keeps
-onboarding to a single paste and keeps secrets out of the repo, config, and shell
-history.
+`aws-launch` never stores AWS keys. All access goes through a **named AWS profile**
+you set up once per machine; the skill only ever uses the profile's *name*. Keys stay
+in `~/.aws/` and out of the repo, the config, and chat.
 
-## What you need from your admin
-An AWS identity that can **assume the cluster's deployer role**
-(`ParallelClusterDeployer`). Your admin gives you **one** of:
-- an **access key + secret** (an IAM user that can assume the role), or
-- **SSO** access (an AWS IAM Identity Center login), or
-- a ready-made `~/.aws/config` + `~/.aws/credentials` snippet to drop in.
+## Which identity you have
+The shared `champsim` cluster (account `524558748675`, region `us-east-1`) has two
+kinds of identity:
 
-You do **not** need to understand AWS to use the cluster — just complete one of
-the setups below, then hand the skill your profile name.
+- **Cluster users (almost everyone).** You get a personal IAM user,
+  `champsim-<name>`, whose access key can do exactly one thing: assume your personal
+  role, `ChampSimRunner<Name>`. That role can read the traces, read and write
+  **only** `s3://champsim-results-all/<name>/…`, wake the head node, and submit and
+  inspect jobs on it. It cannot stop or terminate instances, change the cluster,
+  touch IAM or budgets, or write anyone else's results.
+- **Cluster owner.** Creates and updates the cluster itself by assuming
+  `ParallelClusterDeployer`. If that is not you, you do not need it — skip to setup.
 
-## Option A — access key that assumes the role (most common)
-Put the key in `~/.aws/credentials`:
-```ini
-[aws-launch-src]
-aws_access_key_id = AKIA...
-aws_secret_access_key = ...
-```
-and the role assumption in `~/.aws/config`:
-```ini
-[profile aws-launch]
-role_arn = arn:aws:iam::<ACCOUNT_ID>:role/ParallelClusterDeployer
-source_profile = aws-launch-src
-region = us-east-1
-duration_seconds = 3600
-```
-Lock it down: `chmod 700 ~/.aws && chmod 600 ~/.aws/*`.
+## What your admin gives you
+1. Your key file, `champsim-<name>-key.json`, holding an `AccessKeyId` and a
+   `SecretAccessKey`. It is shown once, when created; nobody else keeps a copy.
+2. Your role ARN: `arn:aws:iam::524558748675:role/parallelcluster/ChampSimRunner<Name>`
+   (for Mihai: `…/ChampSimRunnerMihai`).
 
-## Option B — plain access key (if your key IS the deployer identity)
-```bash
-aws configure --profile aws-launch      # paste key, secret; region us-east-1
-```
+## Setup
+1. Install **AWS CLI v2** (v1 handles assumed roles differently), **Python 3** with
+   **PyYAML** (`pip install pyyaml`), and Claude Code.
 
-## Option C — SSO
-```bash
-aws configure sso --profile aws-launch  # follow the browser login
-```
+2. Put your key in `~/.aws/credentials`, copying the two values from your key file:
+   ```ini
+   [champsim-key]
+   aws_access_key_id = AKIA...
+   aws_secret_access_key = ...
+   ```
 
-## Verify (the skill does this at bootstrap, but you can too)
-```bash
-AWS_PROFILE=aws-launch aws sts get-caller-identity
-# the Arn should contain assumed-role/ParallelClusterDeployer
-```
-Then set `aws_profile: aws-launch` in `<repo>/.aws-launch/config.yml` (bootstrap
-writes it for you). That's it — `submit`/`status`/`collect` now work.
+3. Add the profile that assumes your role to `~/.aws/config`:
+   ```ini
+   [profile champsim]
+   role_arn = arn:aws:iam::524558748675:role/parallelcluster/ChampSimRunner<Name>
+   source_profile = champsim-key
+   region = us-east-1
+   duration_seconds = 3600
+   ```
+   Then lock both files down: `chmod 700 ~/.aws && chmod 600 ~/.aws/*`.
 
-## Notes
-- **Never commit keys or paste them into config.yml / chat.** They live only in
-  `~/.aws/`. The skill and config reference the profile *name* only.
-- The cluster is a **shared** resource — everyone submits to the same Spot queue,
-  and the head-node wake/auto-stop is shared and idempotent (whoever submits next
-  transparently wakes it). Your admin provisions each person's IAM identity; the
-  skill is agnostic to how you authenticate.
-- STS tokens are short-lived (e.g. 1 h) and auto-refresh from the source profile —
-  no action needed if a long run outlasts a token.
-- If a call fails with `AccessDenied` on a service-linked role or budgets, that's
-  an admin-side account setup item, not your profile — see
-  `operational-notes.md` (§ "Why a command failed").
+4. Verify:
+   ```bash
+   aws sts get-caller-identity --profile champsim
+   # Arn must contain  assumed-role/ChampSimRunner<Name>/
+   aws s3 ls s3://champsim-traces-all/ --profile champsim
+   # lists trace prefixes such as version2/ and version2.1/
+   ```
+
+5. When the skill bootstraps a repo (`configure`), give it:
+   - profile **`champsim`** (or whatever you named the profile in step 3)
+   - cluster **`champsim`**
+   - project **`<name>/<project>`** — the first part MUST be your own name, in
+     lowercase, e.g. `mihai/pythia-sweep`. Your role can only write under
+     `champsim-results-all/<name>/`, so any other owner makes every upload fail
+     with `AccessDenied`.
+
+That's it. There is no MFA prompt and nothing to renew: the CLI trades your key for a
+fresh 1-hour role session on its own whenever the last one expires. Long simulations
+are unaffected either way — jobs run on the cluster under the cluster's own
+permissions, not your session.
+
+## Keep the key safe
+Your access key is the only thing standing between the internet and your share of the
+cluster. Keep it only in `~/.aws/credentials`: never in a repo, `config.yml`, a
+script, or a chat. If it may have leaked, tell your admin; they delete it and issue a
+new one (`cluster-access-setup.sh --reissue-keys=<Name>`).
+
+## When the setup fails
+| Symptom | Cause and fix |
+|---|---|
+| `InvalidClientTokenId` or `SignatureDoesNotMatch` | The key in `[champsim-key]` is mistyped, or was deleted. Re-copy both values from the key file, or ask your admin to reissue it. |
+| `AccessDenied` when calling the `AssumeRole` operation | Wrong `role_arn` (check the name's capitalization), or your user was never allowed to assume it. The admin fixes the latter by running `cluster-access-setup.sh --people=<Name>`. |
+| `get-caller-identity` shows `user/champsim-<name>`, not `assumed-role/…` | You ran it with `--profile champsim-key` (the raw key) instead of `--profile champsim`. |
+| `AccessDenied` on `PutObject` / uploads fail | The owner part of `project` in `config.yml` is not your lowercase name. |
+| `AccessDenied` on stopping or terminating instances, CloudFormation, IAM or budgets | Intentional; runner roles cannot change the cluster. Ask the cluster owner. |
+| `ExpiredToken` in the middle of a command | The 1-hour session rolled over; retry. |

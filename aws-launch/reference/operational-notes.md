@@ -318,6 +318,9 @@ while the user is present. When a batch reaches `complete`, offer to collect.
 | `AccessDenied` on any non-`region` call | Region lock — every call must use the config `region`. |
 | `AccessDenied` on `RunInstances` for compute | Compute must be Spot (on-demand denied); or the instance type is off-allowlist. |
 | `AccessDenied` on `budgets:*` | Intentional; the deployer can't read/alter budgets. Surface to admin. |
+| `AccessDenied` on the `AssumeRole` operation | The profile's `role_arn` is wrong, or the user was never allowed to assume it. See `credentials.md`. |
+| `AccessDenied` on `PutObject` under the results bucket (a cluster user) | The owner part of `project` is not the user's own name; a `ChampSimRunner<Name>` role writes only under `<results-bucket>/<name>/`. |
+| `AccessDenied` on `StopInstances` / `TerminateInstances` / CloudFormation (a cluster user) | Intentional; runner roles cannot change the cluster. Only the cluster owner (`ParallelClusterDeployer`) can. |
 | Sim crashes `va_to_pa Assertion 0` on a `.champsim2.zst` trace | v2 trace read as v1 — add `--trace_version=2` to the knobs. |
 | STS/credential error mid-run | 1 h token expired; it auto-refreshes from the source profile — just retry. |
 | `submit` refuses with `live_tree_reference` | An experiment, once its `$(VAR)`s are expanded and its paths normalized, points into `remote_repo_path` outside `snapshot_dirs`, or into `remote_infra_path`; queued jobs would read it live. Move the file under a `snapshot_dirs` entry, add its dir to `snapshot_dirs`, drop the reference, or write a path into `snapshot_dirs` in the canonical spelling the message shows. |

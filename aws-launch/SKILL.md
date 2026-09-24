@@ -19,12 +19,14 @@ reference workload — see `examples/champsim/`.
 
 ## Credentials — the only real setup step
 All AWS access is through a **named AWS profile** — **never raw keys in the repo
-or config**. One-time, the user configures the profile their admin gave them
-(`aws configure --profile aws-launch`, or an assume-role / SSO profile);
-`config.yml`'s `aws_profile` names it. The skill validates it
-(`aws sts get-caller-identity`) at bootstrap. Full walkthrough (built for interns
-and collaborators): **`reference/credentials.md`** — read it before the first use
-on a new machine.
+or config**. Each cluster user has a personal role, `ChampSimRunner<Name>`, which
+their own access key assumes through a profile in `~/.aws/config`; only the cluster
+owner uses `ParallelClusterDeployer`. `config.yml`'s `aws_profile` names the profile,
+and the skill validates it (`aws sts get-caller-identity`) at bootstrap: for a
+cluster user the Arn must contain `assumed-role/ChampSimRunner<Name>`. A runner role
+writes only under `<results-bucket>/<name>/`, so the owner part of `project` must be
+that user's own lowercase name. Full walkthrough: **`reference/credentials.md`** —
+read it before the first use on a new machine.
 
 ## Config
 Each repo carries a gitignored `<repo>/.aws-launch/config.yml` (schema:

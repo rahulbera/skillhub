@@ -10,7 +10,7 @@
 job_name: Hermes
 
 # --- AWS access (see reference/credentials.md) ---
-aws_profile: aws-launch            # named profile in ~/.aws/ that assumes the deployer role
+aws_profile: aws-launch            # named profile in ~/.aws/ that assumes YOUR ChampSimRunner<Name> role
 region: us-east-1                  # region is locked; every call is scoped here
 cluster_name: champsim             # ParallelCluster name; head node is found by its tags
 
